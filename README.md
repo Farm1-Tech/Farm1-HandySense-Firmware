@@ -1,10 +1,6 @@
-# Firmware-HandySense-board
-![](https://komarev.com/ghpvc/?username=your-github-Firmware-HandySense-board&color=brightgreen) 
+# Farm1 HandySense Firmware
 
-Update firmware for HandySense board.
-
-
-![432021_210304_2](https://user-images.githubusercontent.com/80938836/111821386-2ac7fc80-8915-11eb-86a7-7fffc4a2d4de.jpg)
+เฟิร์มแวร์ HandySense สำหรับบอร์ด Farm1 by ArtronShop
 
 # Open Hardware Facts
 ![](https://github.com/HandySense/HandySense/blob/main/os.PNG)
