@@ -1,3 +1,21 @@
 [submodule "lib/NTPClient"]
 	path = lib/NTPClient
 	url = https://github.com/arduino-libraries/NTPClient.git
+[submodule "lib/pubsubclient"]
+	path = lib/pubsubclient
+	url = https://github.com/knolleary/pubsubclient.git
+[submodule "lib/ArduinoJson"]
+	path = lib/ArduinoJson
+	url = https://github.com/bblanchon/ArduinoJson.git
+[submodule "lib/Adafruit_SHT31"]
+	path = lib/Adafruit_SHT31
+	url = https://github.com/adafruit/Adafruit_SHT31.git
+[submodule "lib/BH1750"]
+	path = lib/BH1750
+	url = https://github.com/claws/BH1750.git
+[submodule "lib/Max44009"]
+	path = lib/Max44009
+	url = https://github.com/RobTillaart/Max44009.git
+[submodule "lib/RTClib"]
+	path = lib/RTClib
+	url = https://github.com/adafruit/RTClib.git
