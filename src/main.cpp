@@ -18,6 +18,17 @@
 #include <Update.h>
 #include <SPI.h>
 
+void timmer_setting(String topic, byte * payload, unsigned int length) ;
+void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
+void Get_soil() ;
+void Get_sht31() ;
+void TaskWifiStatus(void * pvParameters) ;
+void TaskWaitSerial(void * WaitSerial) ;
+void sent_dataTimer(String topic, String message) ;
+void ControlRelay_Bytimmer() ;
+void TempMaxMin_setting(String topic, String message, unsigned int length) ;
+void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
+
 #ifdef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
 #define DEBUG_PRINTLN(x)  //Serial.println(x)
