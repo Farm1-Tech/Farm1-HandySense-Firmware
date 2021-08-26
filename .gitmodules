@@ -19,3 +19,9 @@
 [submodule "lib/RTClib"]
 	path = lib/RTClib
 	url = https://github.com/adafruit/RTClib.git
+[submodule "lib/ArduinoStreamUtils"]
+	path = lib/ArduinoStreamUtils
+	url = https://github.com/bblanchon/ArduinoStreamUtils.git
+[submodule "lib/Adafruit_BusIO"]
+	path = lib/Adafruit_BusIO
+	url = https://github.com/adafruit/Adafruit_BusIO.git

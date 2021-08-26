@@ -16,6 +16,7 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Update.h>
+#include <SPI.h>
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
