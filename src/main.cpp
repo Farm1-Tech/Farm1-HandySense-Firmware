@@ -10,13 +10,14 @@
 #include "Adafruit_SHT31.h"
 #include <BH1750.h>
 #include "Max44009.h"
-#include "RTClib.h"
+// #include "RTClib.h"
 #include "time.h"
 #include <WiFiClient.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <SPI.h>
+#include "Artron_DS1338.h"
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
@@ -126,8 +127,7 @@ const char* serverIndex =
   "</script>";
 
 // ประกาศใช้ rtc
-RTC_DS1307 rtc;
-DateTime _now;
+Artron_DS1338 rtc(&Wire);
 
 // ประกาศใช้เวลาบน Internet
 const char* ntpServer = "pool.ntp.org";
@@ -253,7 +253,7 @@ int t[20];
 #define connect_WifiStatusToBox     23
 
 /* new PCB Red */
-int relay_pin[4] = {25, 4, 12, 13};
+int relay_pin[4] = {25, 14, 12, 13};
 #define status_sht31_error          5
 #define status_max44009_error       18
 #define status_soil_error           19
@@ -562,32 +562,29 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
 void ControlRelay_Bytimmer() {
   int curentTimer;
   int dayofweek;
+  bool getTimeFromInternet = false;
   if (WiFi.status() == WL_CONNECTED) {
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
     if (getLocalTime(&timeinfo)) {
-      yearNow     = timeinfo.tm_year + 1900;
-      monthNow    = timeinfo.tm_mon + 1;
-      dayNow      = timeinfo.tm_mday;
-      weekdayNow  = timeinfo.tm_wday;
-      hourNow     = timeinfo.tm_hour;
-      minuteNow   = timeinfo.tm_min;
-      secondNow   = timeinfo.tm_sec;
-
-      curentTimer = (hourNow * 60) + minuteNow;
-      dayofweek = weekdayNow - 1;
-    } else {
-      _now = rtc.now();
-      curentTimer = (_now.hour() * 60) + _now.minute();
-      dayofweek = _now.dayOfTheWeek() - 1;
-      DEBUG_PRINT("USE RTC 1");
+      getTimeFromInternet = true;
     }
   }
-  else {
-    _now = rtc.now();
-    curentTimer = (_now.hour() * 60) + _now.minute();
-    dayofweek = _now.dayOfTheWeek() - 1;
-    DEBUG_PRINT("USE RTC 2");
+  if (!getTimeFromInternet) {
+    rtc.read(&timeinfo);
+    DEBUG_PRINT("USE RTC 1");
   }
+  
+  yearNow     = timeinfo.tm_year + 1900;
+  monthNow    = timeinfo.tm_mon + 1;
+  dayNow      = timeinfo.tm_mday;
+  weekdayNow  = timeinfo.tm_wday;
+  hourNow     = timeinfo.tm_hour;
+  minuteNow   = timeinfo.tm_min;
+  secondNow   = timeinfo.tm_sec;
+
+  curentTimer = (hourNow * 60) + minuteNow;
+  dayofweek = weekdayNow - 1;
+
   //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
   /* check curentTimer => 0-1440 */
   if (curentTimer < 0 || curentTimer > 1440) {
@@ -1072,6 +1069,7 @@ void setup() {
   EEPROM.begin(4096);
   Wire.begin();
   Wire.setClock(10000);
+  rtc.begin();
   pinMode(Soil_moisture_sensorPin, INPUT);
   pinMode(relay_pin[0], OUTPUT);
   pinMode(relay_pin[1], OUTPUT);
@@ -1202,13 +1200,7 @@ void TaskWifiStatus(void * pvParameters) {
 
       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
       printLocalTime();
-      yearNow = timeinfo.tm_year + 1900;
-      monthNow = timeinfo.tm_mon + 1;
-      dayNow = timeinfo.tm_mday;
-      hourNow = timeinfo.tm_hour;
-      minuteNow = timeinfo.tm_min;
-      secondNow = timeinfo.tm_sec;
-      rtc.adjust(DateTime(yearNow, monthNow, dayNow, hourNow, minuteNow, secondNow));
+      rtc.write(&timeinfo);
 
       OTA_update();
     }
