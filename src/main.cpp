@@ -18,6 +18,50 @@
 #include <Update.h>
 #include <SPI.h>
 #include "Artron_DS1338.h"
+#include <TFT_eSPI.h>
+#include <lvgl.h>
+
+#define LCD_BL_PIN 32
+
+TFT_eSPI tft = TFT_eSPI();
+
+static lv_disp_buf_t disp_buf;
+static lv_color_t buf[LV_HOR_RES_MAX * 10];
+
+/* Display flushing */
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+  uint32_t w = (area->x2 - area->x1 + 1);
+  uint32_t h = (area->y2 - area->y1 + 1);
+
+  tft.startWrite();
+  tft.setAddrWindow(area->x1, area->y1, w, h);
+  tft.pushColors(&color_p->full, w * h, true);
+  tft.endWrite();
+
+  lv_disp_flush_ready(disp);
+}
+
+bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
+  uint16_t x = 0, y = 0;
+  bool touched = tft.getTouch(&x, &y, 500);
+
+  data->point.x = x;
+  data->point.y = y;
+  data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  
+  return false; /*No buffering now so no more data read*/
+}
+
+extern void load_page() ;
+
+extern lv_obj_t* txtTime;
+extern lv_obj_t* imgWiFi;
+extern lv_obj_t* imgNexpie;
+
+extern lv_obj_t* txtTemp;
+extern lv_obj_t* txtHumi;
+extern lv_obj_t* txtHumi2;
+extern lv_obj_t* txtLight;
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
@@ -189,10 +233,10 @@ char msg_Minsoil[100],
 char msg_Mintemp[100],
      msg_Maxtemp[100];
 
-int LEDR = 26,  // LED 26= Blue => แสดงสถานะเชื่อมต่อ Wifi
-    LEDY = 27;  // LED 27 = Yenllow => แสดงสถานะส่งข้อมูล, โหมดเชื่อต่อ
+int LEDR = -1,  // LED 26= Blue => แสดงสถานะเชื่อมต่อ Wifi
+    LEDY = -1;  // LED 27 = Yenllow => แสดงสถานะส่งข้อมูล, โหมดเชื่อต่อ
 
-const unsigned long eventInterval             = 2 * 1000;          // อ่านค่า temp และ soil sensor ทุก ๆ 2 วินาที
+const unsigned long eventInterval             = 1 * 1000;          // อ่านค่า temp และ soil sensor ทุก ๆ 1 วินาที
 const unsigned long eventInterval_brightness  = 6 * 1000;          // อ่านค่า brightness sensor ทุก ๆ 6 วินาที
 unsigned long previousTime_Temp_soil          = 0;
 unsigned long previousTime_brightness         = 0;
@@ -250,13 +294,13 @@ int t[20];
 #define Open_relay(j)    digitalWrite(relay_pin[j], HIGH)
 #define Close_relay(j)   digitalWrite(relay_pin[j], LOW)
 
-#define connect_WifiStatusToBox     23
+#define connect_WifiStatusToBox     -1
 
 /* new PCB Red */
 int relay_pin[4] = {25, 14, 12, 13};
-#define status_sht31_error          5
-#define status_max44009_error       18
-#define status_soil_error           19
+#define status_sht31_error          -1
+#define status_max44009_error       -1
+#define status_soil_error           -1
 
 // ตัวแปรเก็บค่าการตั้งเวลาทำงานอัตโนมัติ
 unsigned int time_open[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
@@ -584,6 +628,11 @@ void ControlRelay_Bytimmer() {
 
   curentTimer = (hourNow * 60) + minuteNow;
   dayofweek = weekdayNow - 1;
+  
+  static char time_str_buff[20];
+  sprintf(time_str_buff, "%02d:%02d:%02d", hourNow, minuteNow, secondNow);
+  lv_label_set_text(txtTime, time_str_buff);
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
 
   //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
   /* check curentTimer => 0-1440 */
@@ -1095,6 +1144,54 @@ void setup() {
     digitalWrite(LEDY, 1);    digitalWrite(LEDR, 0);    delay(50);
   }
   digitalWrite(LEDY, HIGH);     digitalWrite(LEDR, HIGH);
+
+  tft.begin(); /* TFT init */
+  tft.setRotation(3); /* Landscape orientation */
+
+  lv_init();
+
+  lv_disp_buf_init(&disp_buf, buf, NULL, LV_HOR_RES_MAX * 10);
+
+  /*Initialize the display*/
+  lv_disp_drv_t disp_drv;
+  lv_disp_drv_init(&disp_drv);
+  disp_drv.hor_res = 320;
+  disp_drv.ver_res = 240;
+  disp_drv.flush_cb = my_disp_flush;
+  disp_drv.buffer = &disp_buf;
+  lv_disp_drv_register(&disp_drv);
+
+  /*Initialize the (dummy) input device driver*/
+  lv_indev_drv_t indev_drv;
+  lv_indev_drv_init(&indev_drv);
+  indev_drv.type = LV_INDEV_TYPE_POINTER;
+  indev_drv.read_cb = my_input_read;
+  lv_indev_drv_register(&indev_drv);
+
+  load_page();
+
+  // Set all label
+  lv_label_set_text(txtTime, "LOADING");
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
+
+  lv_obj_set_hidden(imgWiFi, false);
+  lv_obj_set_hidden(imgNexpie, false);
+
+  lv_label_set_text(txtTemp, "");
+  lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
+
+  lv_label_set_text(txtHumi, "");
+  lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+
+  lv_label_set_text(txtHumi2, "");
+  lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
+
+  lv_label_set_text(txtLight, "");
+  lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+
+  pinMode(LCD_BL_PIN, OUTPUT);
+  digitalWrite(LCD_BL_PIN, LOW);
+
   Edit_device_wifi();
   EepromStream eeprom(0, 1024);           // ประกาศ Object eepromSteam ที่ Address 0 ขนาด 1024 byte
   deserializeJson(jsonDoc, eeprom);       // คือการรับหรืออ่านข้อมูล jsonDoc ใน eeprom
@@ -1120,6 +1217,7 @@ void setup() {
 }
 
 void loop() {
+  lv_task_handler(); /* let the GUI do its work */
   client.loop();
   server.handleClient();
   delay(1);
@@ -1135,7 +1233,34 @@ void loop() {
     DEBUG_PRINT("Brightness : "); DEBUG_PRINT(lux_44009); DEBUG_PRINT(" Klux, ");
     DEBUG_PRINT("Soil  : ");      DEBUG_PRINT(soil);      DEBUG_PRINTLN(" %");
 
+    lv_label_set_text(txtTemp, String(temp, 1).c_str());
+    lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
+
+    lv_label_set_text(txtHumi, String(humidity, 1).c_str());
+    lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+
+    lv_label_set_text(txtHumi2, String(soil, 1).c_str());
+    lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
+
+    lv_label_set_text(txtLight, String(lux_44009, 1).c_str());
+    lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+
     previousTime_Temp_soil = currentTime;
+  }
+  static unsigned long previousTime_wifi_connect = 0;
+  if ((previousTime_wifi_connect == 0) || ((currentTime - previousTime_wifi_connect) >= 300)) {
+    if (WiFi.isConnected()) {
+      lv_obj_set_hidden(imgWiFi, false);
+      if (client.connected()) {
+        lv_obj_set_hidden(imgNexpie, false);
+      } else {
+        lv_obj_set_hidden(imgNexpie, !lv_obj_get_hidden(imgNexpie));
+      }
+    } else {
+      lv_obj_set_hidden(imgWiFi, !lv_obj_get_hidden(imgWiFi));
+      lv_obj_set_hidden(imgNexpie, true);
+    }
+    previousTime_wifi_connect = currentTime;
   }
   if (currentTime - previousTime_brightness >= eventInterval_brightness) {
     Get_max44009();
