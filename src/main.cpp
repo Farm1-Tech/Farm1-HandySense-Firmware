@@ -216,7 +216,8 @@ NTPClient timeClient(ntpUDP);
 int curentTimerError = 0;
 
 // ประกาศตัวแปรเรียกใช้ Max44009
-Max44009 myLux(0x4A);
+// Max44009 myLux(0x4A);
+BH1750 lightMeter(0x23); // ADDR connect to GND
 
 // ประกาศตัวแปรเรียกใช้ SHT31
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
@@ -899,7 +900,9 @@ void Get_max44009() {
   float buffer_lux  = 0;
   float lux_cal     = 0;
   int num_lux       = 0;
-  buffer_lux = myLux.getLux() / 1000;
+  // buffer_lux = myLux.getLux() / 1000;
+  buffer_lux = lightMeter.readLightLevel() / 1000.0; // lux to klux
+
   if (buffer_lux < 0 || buffer_lux > 188000 || isnan(buffer_lux)) { // range 0.045 to 188,000 lux
     if (lux_error_count >= 10) {
       lux_error = 1;
@@ -1119,6 +1122,7 @@ void setup() {
   Wire.begin();
   Wire.setClock(10000);
   rtc.begin();
+  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
   pinMode(Soil_moisture_sensorPin, INPUT);
   pinMode(relay_pin[0], OUTPUT);
   pinMode(relay_pin[1], OUTPUT);
@@ -1138,7 +1142,9 @@ void setup() {
   digitalWrite(relay_pin[1], LOW);
   digitalWrite(relay_pin[2], LOW);
   digitalWrite(relay_pin[3], LOW);
-  if (! sht31.begin(0x44)) {}
+  if (!sht31.begin(0x44)) {
+    Serial.println("Init SHT31 error, Sensor not connect ?");
+  }
   for (int x = 0; x < 20; x++) {
     digitalWrite(LEDY, 0);    digitalWrite(LEDR, 1);    delay(50);
     digitalWrite(LEDY, 1);    digitalWrite(LEDR, 0);    delay(50);
@@ -1213,7 +1219,8 @@ void setup() {
   ma_soil[0] = ma_soil[1] = ma_soil[2] = ma_soil[3] = ma_soil[4] = ((-58.82) * voltageValue_soil_moisture) + 123.52;
   ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht31.readTemperature();
   ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht31.readHumidity();
-  ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = myLux.getLux() / 1000;
+  // ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = myLux.getLux() / 1000;
+  ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = lightMeter.readLightLevel() / 1000; // lux to klux
 }
 
 void loop() {
@@ -1267,7 +1274,7 @@ void loop() {
     previousTime_brightness = currentTime;
   }
   unsigned long currentTime_Update_data = millis();
-  if (currentTime_Update_data - previousTime_Update_data >= (eventInterval_publishData)) {
+  if (previousTime_Update_data == 0 || (currentTime_Update_data - previousTime_Update_data >= (eventInterval_publishData))) {
     //check_sendData_toWeb = 1;
     UpdateData_To_Server();
     previousTime_Update_data = currentTime_Update_data;
