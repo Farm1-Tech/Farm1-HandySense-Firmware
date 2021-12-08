@@ -7,7 +7,7 @@
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include <StreamUtils.h>
-#include "Adafruit_SHT31.h"
+// #include "Adafruit_SHT31.h"
 #include <BH1750.h>
 #include "Max44009.h"
 // #include "RTClib.h"
@@ -18,6 +18,7 @@
 #include <Update.h>
 #include <SPI.h>
 #include "Artron_DS1338.h"
+#include "Artron_SHT20.h"
 #include <TFT_eSPI.h>
 #include <lvgl.h>
 
@@ -66,7 +67,7 @@ extern lv_obj_t* txtLight;
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
 void Get_soil() ;
-void Get_sht31() ;
+void Get_sht() ;
 void TaskWifiStatus(void * pvParameters) ;
 void TaskWaitSerial(void * WaitSerial) ;
 void sent_dataTimer(String topic, String message) ;
@@ -220,7 +221,8 @@ int curentTimerError = 0;
 BH1750 lightMeter(0x23); // ADDR connect to GND
 
 // ประกาศตัวแปรเรียกใช้ SHT31
-Adafruit_SHT31 sht31 = Adafruit_SHT31();
+// Adafruit_SHT31 sht31 = Adafruit_SHT31();
+Artron_SHT20 sht(&Wire);
 
 // ประกาศตัวแปรเก็บค่า Soil_moisture_sensor
 #define Soil_moisture_sensorPin   A0
@@ -778,7 +780,7 @@ void ControlRelay_BysoilMinMax() {
 
 /* ----------------------- tempMinMax_ControlRelay --------------------------- */
 void ControlRelay_BytempMinMax() {
-  Get_sht31();
+  Get_sht();
   for (int g = 0; g < 4; g++) {
     if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
       if (temp < Min_Temp[g]) {
@@ -828,13 +830,13 @@ int Mode(float* getdata) {
 }
 
 /* ----------------------- Calculator sensor SHT31  --------------------------- */
-void Get_sht31() {
+void Get_sht() {
   float buffer_temp = 0;
   float buffer_hum  = 0;
   float temp_cal    = 0;
   int num_temp      = 0;
-  buffer_temp = sht31.readTemperature();
-  buffer_hum = sht31.readHumidity();
+  buffer_temp = sht.readTemperature();
+  buffer_hum = sht.readHumidity();
   if (buffer_temp < -40 || buffer_temp > 125 || isnan(buffer_temp)) { // range -40 to 125 C
     if (temp_error_count >= 10) {
       temp_error = 1;
@@ -1142,8 +1144,9 @@ void setup() {
   digitalWrite(relay_pin[1], LOW);
   digitalWrite(relay_pin[2], LOW);
   digitalWrite(relay_pin[3], LOW);
-  if (!sht31.begin(0x44)) {
-    Serial.println("Init SHT31 error, Sensor not connect ?");
+  // if (!sht31.begin(0x44)) {
+  if (!sht.begin()) {
+    Serial.println("Init SHT20 error, Sensor not connect ?");
   }
   for (int x = 0; x < 20; x++) {
     digitalWrite(LEDY, 0);    digitalWrite(LEDR, 1);    delay(50);
@@ -1217,8 +1220,8 @@ void setup() {
   sensorValue_soil_moisture = analogRead(Soil_moisture_sensorPin);
   voltageValue_soil_moisture = (sensorValue_soil_moisture * 3.3) / (4095.00);
   ma_soil[0] = ma_soil[1] = ma_soil[2] = ma_soil[3] = ma_soil[4] = ((-58.82) * voltageValue_soil_moisture) + 123.52;
-  ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht31.readTemperature();
-  ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht31.readHumidity();
+  ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht.readTemperature();
+  ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht.readHumidity();
   // ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = myLux.getLux() / 1000;
   ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = lightMeter.readLightLevel() / 1000; // lux to klux
 }
