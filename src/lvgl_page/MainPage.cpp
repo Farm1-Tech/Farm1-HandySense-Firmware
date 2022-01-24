@@ -1,6 +1,8 @@
 /* ======== Generate by IOXGD Designer ======== */
-
 #include "lvgl.h"
+
+lv_obj_t* MainScreen;
+
 LV_FONT_DECLARE(Kanit_Regular_20);
 LV_FONT_DECLARE(Kanit_Regular_16);
 LV_FONT_DECLARE(Kanit_Regular_14);
@@ -56,13 +58,19 @@ static lv_style_t txtTime_style;
 lv_obj_t* txtTime;
 /* ====== END of txtTime header ====== */
 
+/* ========== img5 header ========== */
+LV_IMG_DECLARE(img_gear);
+/* ====== END of img5 header ====== */
 
-void load_page() {
+
+void load_page_main() {
+  MainScreen = lv_obj_create(NULL, NULL);
+
   static lv_style_t style_screen;
   lv_style_copy(&style_screen, &lv_style_plain);
   style_screen.body.main_color = lv_color_hex(0xFFFFFF);
   style_screen.body.grad_color = lv_color_hex(0xFFFFFF);
-  lv_obj_set_style(lv_scr_act(), &style_screen);
+  lv_obj_set_style(MainScreen, &style_screen);
   
   /* ========== Main ========== */
   static lv_style_t Main_style;
@@ -80,7 +88,7 @@ void load_page() {
   Main_style.body.shadow.width = 0;
   Main_style.body.shadow.type = LV_SHADOW_FULL;
   
-  Main = lv_obj_create(lv_scr_act(), NULL);
+  Main = lv_obj_create(MainScreen, NULL);
   lv_obj_set_style(Main, &Main_style);
   lv_obj_set_size(Main, 320, 240);
   lv_obj_align(Main, NULL, LV_ALIGN_IN_TOP_LEFT, 0, 0);
@@ -222,7 +230,7 @@ void load_page() {
   /* ========== img1 ========== */
   lv_obj_t* img1;
   
-  img1 = lv_img_create(lv_scr_act(), NULL);
+  img1 = lv_img_create(MainScreen, NULL);
   lv_img_set_src(img1, &img_thermometer);
   lv_obj_align(img1, NULL, LV_ALIGN_IN_TOP_LEFT, 20, 80);
   
@@ -437,7 +445,7 @@ void load_page() {
   topBar_style.body.shadow.width = 0;
   topBar_style.body.shadow.type = LV_SHADOW_FULL;
   
-  topBar = lv_obj_create(lv_scr_act(), NULL);
+  topBar = lv_obj_create(MainScreen, NULL);
   lv_obj_set_style(topBar, &topBar_style);
   lv_obj_set_size(topBar, 320, 50);
   lv_obj_align(topBar, NULL, LV_ALIGN_IN_TOP_LEFT, 0, 0);
@@ -491,8 +499,57 @@ void load_page() {
   lv_label_set_align(txtTime, LV_LABEL_ALIGN_LEFT);
   lv_label_set_text(txtTime, "Hello");
   lv_obj_set_size(txtTime, 0, 0);
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);
   
   lv_obj_set_hidden(txtTime, false);
   /* ====== END of txtTime ====== */
+  
+  /* ========== btnGoToSettings ========== */
+  static lv_style_t btnGoToSettings_rel_style;
+  static lv_style_t btnGoToSettings_pr_style;
+  lv_obj_t* btnGoToSettings;
+  extern void btnGoToSettingsHandle(lv_obj_t*, lv_event_t);
+  static lv_style_t btnGoToSettings_label_style;
+  lv_obj_t* btnGoToSettings_label;
+  
+  lv_style_copy(&btnGoToSettings_rel_style, &lv_style_plain);
+  btnGoToSettings_rel_style.body.main_color = lv_color_hex(0x0EA661);
+  btnGoToSettings_rel_style.body.grad_color = lv_color_hex(0x0EA661);
+  btnGoToSettings_rel_style.body.radius = 0;
+  btnGoToSettings_rel_style.body.border.color = lv_color_hex(0x0B1928);
+  btnGoToSettings_rel_style.body.border.width = 0;
+  
+  lv_style_copy(&btnGoToSettings_pr_style, &lv_style_plain);
+  btnGoToSettings_pr_style.body.main_color = lv_color_hex(0x0C8950);
+  btnGoToSettings_pr_style.body.grad_color = lv_color_hex(0x0C8950);
+  btnGoToSettings_pr_style.body.radius = 0;
+  btnGoToSettings_pr_style.body.border.color = lv_color_hex(0x0B1928);
+  btnGoToSettings_pr_style.body.border.width = 0;
+  
+  btnGoToSettings = lv_btn_create(topBar, NULL);
+  lv_obj_set_event_cb(btnGoToSettings, btnGoToSettingsHandle);
+  lv_btn_set_style(btnGoToSettings, LV_BTN_STATE_REL, &btnGoToSettings_rel_style);
+  lv_btn_set_style(btnGoToSettings, LV_BTN_STATE_PR, &btnGoToSettings_pr_style);
+  lv_obj_set_size(btnGoToSettings, 40, 50);
+  lv_obj_align(btnGoToSettings, NULL, LV_ALIGN_IN_TOP_LEFT, 0, 0);
+  
+  lv_style_copy(&btnGoToSettings_label_style, &lv_style_plain);
+  btnGoToSettings_label_style.text.color = lv_color_hex(0xFFFFFF);
+  btnGoToSettings_label_style.text.font = &lv_font_roboto_16;
+  btnGoToSettings_label = lv_label_create(btnGoToSettings, NULL);
+  lv_label_set_style(btnGoToSettings_label, LV_LABEL_STYLE_MAIN, &btnGoToSettings_label_style);
+  lv_label_set_text(btnGoToSettings_label, "");
+  
+  lv_obj_set_hidden(btnGoToSettings, false);
+  /* ====== END of btnGoToSettings ====== */
+  
+  /* ========== img5 ========== */
+  lv_obj_t* img5;
+  
+  img5 = lv_img_create(topBar, NULL);
+  lv_img_set_src(img5, &img_gear);
+  lv_obj_align(img5, NULL, LV_ALIGN_IN_LEFT_MID, 10, 0);
+  
+  lv_obj_set_hidden(img5, false);
+  /* ====== END of img5 ====== */
 }

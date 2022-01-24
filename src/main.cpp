@@ -21,6 +21,7 @@
 #include "Artron_SHT20.h"
 #include <TFT_eSPI.h>
 #include <lvgl.h>
+#include <lv_qrcode.h>
 
 #define LCD_BL_PIN 32
 
@@ -42,9 +43,34 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
   lv_disp_flush_ready(disp);
 }
 
+
+struct {
+  uint16_t max_x = 0;
+  uint16_t max_y = 0;
+  uint16_t min_x = 0;
+  uint16_t min_y = 0;
+} TouchCalibration;
+
 bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
   uint16_t x = 0, y = 0;
-  bool touched = tft.getTouch(&x, &y, 500);
+  // bool touched = tft.getTouch(&x, &y, 500);
+
+  // uint16_t x, y;
+  tft.getTouchRaw(&y, &x); // Axis wrong
+  bool touched = (x > 10) && (y > 10);
+  // Serial.printf("raw_x: %5d\traw_y: %5d\n", x, y);
+
+  x = map(x, TouchCalibration.min_x, TouchCalibration.max_x, 28, 320 - 28);
+  y = map(y, TouchCalibration.min_y, TouchCalibration.max_y, 28, 240 - 28);
+
+  if (touched) {
+    uint16_t xOld = x, yOld = y;
+    y += 22.0 / 152.0 * xOld;
+    Serial.printf("Press: %d, %d\n", x, y);
+    delay(50);
+  } else {
+    Serial.println("No Press");
+  }
 
   data->point.x = x;
   data->point.y = y;
@@ -53,7 +79,9 @@ bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
   return false; /*No buffering now so no more data read*/
 }
 
-extern void load_page() ;
+extern void load_page_main() ;
+
+extern lv_obj_t* MainScreen;
 
 extern lv_obj_t* txtTime;
 extern lv_obj_t* imgWiFi;
@@ -63,6 +91,40 @@ extern lv_obj_t* txtTemp;
 extern lv_obj_t* txtHumi;
 extern lv_obj_t* txtHumi2;
 extern lv_obj_t* txtLight;
+
+extern void load_page_settings() ;
+
+extern lv_obj_t* SettingsScreen;
+
+extern lv_style_t btnSettingsSensor_rel_style;
+extern lv_style_t btnSettingsWiFi_rel_style;
+
+extern lv_obj_t* btnSettingsSensor;
+extern lv_obj_t* btnSettingsWiFi;
+
+extern lv_style_t boxSettingsSensor_style;
+extern lv_style_t boxSettingsWiFi_style;
+
+extern lv_obj_t* MainWiFiConfigs;
+extern lv_obj_t* wifiSSIDBox;
+extern lv_obj_t* wifiPasswordBox;
+
+extern lv_obj_t* MainSensorConfigs;
+extern lv_obj_t* objPosTempSensorSelect;
+extern lv_obj_t* objPosHumiSensorSelect;
+extern lv_obj_t* objPosSoilSensorSelect;
+extern lv_obj_t* objPosLightSensorSelect;
+
+extern void load_page_touch_calibration() ;
+extern lv_obj_t* TouchCalibrationScreen;
+
+extern lv_obj_t* objTopLeftTouchPoint;
+extern lv_obj_t* objBottomLeftTouchPoint;
+extern lv_obj_t* objBottomRightTouchPoint;
+extern lv_obj_t* objRightLeftTouchPoint;
+
+extern lv_obj_t* txtTouchCalibrationStep;
+extern lv_obj_t* txtTouchCalibrationCountdown;
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
@@ -635,7 +697,7 @@ void ControlRelay_Bytimmer() {
   static char time_str_buff[20];
   sprintf(time_str_buff, "%02d:%02d:%02d", hourNow, minuteNow, secondNow);
   lv_label_set_text(txtTime, time_str_buff);
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);
 
   //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
   /* check curentTimer => 0-1440 */
@@ -1113,6 +1175,189 @@ void IRAM_ATTR Blink_LED() {
   }
 }
 
+void btnGoToSettingsHandle(lv_obj_t *obj, lv_event_t event) {
+  if(event == LV_EVENT_CLICKED) {
+    lv_scr_load(SettingsScreen);
+  }
+}
+
+void SettingsScreenGoBackHandle(lv_obj_t *obj, lv_event_t event) {
+  if(event == LV_EVENT_CLICKED) {
+    lv_scr_load(MainScreen);
+  }
+}
+
+void btnSettingsWiFiHandle(lv_obj_t *obj, lv_event_t event) {
+  Serial.printf("boxSettingsWiFi: %d\n", (int)event);
+  if(event == LV_EVENT_CLICKED) {
+      lv_obj_set_hidden(MainSensorConfigs, true);
+      lv_obj_set_hidden(MainWiFiConfigs, false);
+      btnSettingsWiFi_rel_style.body.main_color = lv_color_hex(0x0C8950);
+      btnSettingsWiFi_rel_style.body.grad_color = lv_color_hex(0x0C8950);
+      btnSettingsSensor_rel_style.body.main_color = lv_color_hex(0x0EA661);
+      btnSettingsSensor_rel_style.body.grad_color = lv_color_hex(0x0EA661);
+      lv_obj_set_style(btnSettingsWiFi, &btnSettingsWiFi_rel_style);
+      lv_obj_set_style(btnSettingsSensor, &btnSettingsSensor_rel_style);
+  }
+}
+  
+void btnSettingsSensorHandle(lv_obj_t *obj, lv_event_t event) {
+  Serial.printf("boxSettingsSensor: %d\n", (int)event);
+  if(event == LV_EVENT_CLICKED) {
+      lv_obj_set_hidden(MainSensorConfigs, false);
+      lv_obj_set_hidden(MainWiFiConfigs, true);
+      btnSettingsWiFi_rel_style.body.main_color = lv_color_hex(0x0EA661);
+      btnSettingsWiFi_rel_style.body.grad_color = lv_color_hex(0x0EA661);
+      btnSettingsSensor_rel_style.body.main_color = lv_color_hex(0x0C8950);
+      btnSettingsSensor_rel_style.body.grad_color = lv_color_hex(0x0C8950);
+      lv_obj_set_style(btnSettingsWiFi, &btnSettingsWiFi_rel_style);
+      lv_obj_set_style(btnSettingsSensor, &btnSettingsSensor_rel_style);
+  }
+}
+
+void do_touch_calibration() {
+  uint8_t state = 0;
+  uint16_t i = 0;
+  uint32_t posXsum = 0, posYsum = 0;
+  uint8_t posSample = 0;
+  while(1) {
+    lv_task_handler(); /* let the GUI do its work */
+    
+    uint16_t x, y;
+    // tft.getTouchRaw(&x, &y);
+    tft.getTouchRaw(&y, &x); // Axis wrong
+    Serial.printf("x: %5d\ty: %5d\n", x, y);
+    /* Serial.printf("x: %i     ", x);
+    Serial.printf("y: %i     ", y);
+    Serial.printf("z: %i \n", tft.getTouchRawZ());*/
+    bool isPressed = (x > 0) && (y > 0);
+    
+    if (state == 0) {
+      // Hide all point
+      lv_obj_set_hidden(objTopLeftTouchPoint, true);
+      lv_obj_set_hidden(objBottomLeftTouchPoint, true);
+      lv_obj_set_hidden(objBottomRightTouchPoint, true);
+      lv_obj_set_hidden(objRightLeftTouchPoint, true);
+      
+      lv_label_set_text(txtTouchCalibrationStep, "");
+
+      // Hide countdown
+      lv_obj_set_hidden(txtTouchCalibrationCountdown, true);
+
+      // Show touch calibration screen
+      lv_scr_load(TouchCalibrationScreen);
+      state = 1;
+    }
+    if (state == 1) {
+      lv_obj_set_hidden(objTopLeftTouchPoint, false);
+      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านบนซ้ายค้างไว้");
+      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+      state = 2;
+    }
+    if (state == 2) {
+      if (isPressed) {
+        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
+        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+        i = 0;
+        posXsum = 0;
+        posYsum = 0;
+        posSample = 0;
+        state = 3;
+      }
+    }
+    if (state == 3) {
+      if (isPressed) {
+        if (i >= 20) {
+          posXsum += x;
+          posYsum += y;
+          posSample++;
+          if (posSample >= 10) {
+            TouchCalibration.min_x = (float)posXsum / (float)posSample;
+            TouchCalibration.min_y = (float)posYsum / (float)posSample;
+
+            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
+            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_hidden(objTopLeftTouchPoint, true);
+
+            i = 0;
+            state = 4;
+          }
+        }
+        i++;
+      } else {
+        state = 1;
+      }
+    }
+    if (state == 4) {
+      if (!isPressed) {
+        i++;
+        if (i > 100) {
+          state = 5;
+        }
+      }
+    }
+    if (state == 5) {
+      lv_obj_set_hidden(objBottomRightTouchPoint, false);
+      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านล่างขวาค้างไว้");
+      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+      state = 6;
+    }
+    if (state == 6) {
+      if (isPressed) {
+        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
+        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+        i = 0;
+        posXsum = 0;
+        posYsum = 0;
+        posSample = 0;
+        state = 7;
+      }
+    }
+    if (state == 7) {
+      if (isPressed) {
+        if (i >= 20) {
+          posXsum += x;
+          posYsum += y;
+          posSample++;
+          if (posSample >= 10) {
+            TouchCalibration.max_x = (float)posXsum / (float)posSample;
+            TouchCalibration.max_y = (float)posYsum / (float)posSample;
+
+            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
+            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_hidden(objBottomRightTouchPoint, true);
+
+            i = 0;
+            state = 8;
+          }
+        }
+        i++;
+      } else {
+        state = 5;
+      }
+    }
+    if (state == 8) {
+      if (!isPressed) {
+        i++;
+        if (i > 100) {
+          state = 9;
+        }
+      }
+    }
+    if (state == 9) {
+      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.min_x, TouchCalibration.min_y);
+      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.max_x, TouchCalibration.max_y);
+      break;
+    }
+
+    delay(5);
+  }
+}
+
 void setup() {
   hw_timer_t * timer = NULL;
   timer = timerBegin(0, 80, true);
@@ -1148,11 +1393,11 @@ void setup() {
   if (!sht.begin()) {
     Serial.println("Init SHT20 error, Sensor not connect ?");
   }
-  for (int x = 0; x < 20; x++) {
+  /*for (int x = 0; x < 20; x++) {
     digitalWrite(LEDY, 0);    digitalWrite(LEDR, 1);    delay(50);
     digitalWrite(LEDY, 1);    digitalWrite(LEDR, 0);    delay(50);
   }
-  digitalWrite(LEDY, HIGH);     digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDY, HIGH);     digitalWrite(LEDR, HIGH);*/
 
   tft.begin(); /* TFT init */
   tft.setRotation(3); /* Landscape orientation */
@@ -1170,14 +1415,13 @@ void setup() {
   disp_drv.buffer = &disp_buf;
   lv_disp_drv_register(&disp_drv);
 
-  /*Initialize the (dummy) input device driver*/
-  lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = my_input_read;
-  lv_indev_drv_register(&indev_drv);
+  load_page_main();
+  load_page_settings();
+  load_page_touch_calibration();
 
-  load_page();
+  lv_obj_set_x(MainSensorConfigs, 0);
+  lv_obj_set_hidden(MainSensorConfigs, true);
+  lv_obj_set_hidden(MainWiFiConfigs, false);
 
   // Set all label
   lv_label_set_text(txtTime, "LOADING");
@@ -1201,6 +1445,18 @@ void setup() {
   pinMode(LCD_BL_PIN, OUTPUT);
   digitalWrite(LCD_BL_PIN, LOW);
 
+  do_touch_calibration();
+
+  /*Initialize the (dummy) input device driver*/
+  lv_indev_drv_t indev_drv;
+  lv_indev_drv_init(&indev_drv);
+  indev_drv.type = LV_INDEV_TYPE_POINTER;
+  indev_drv.read_cb = my_input_read;
+  lv_indev_drv_register(&indev_drv);
+
+  lv_scr_load(MainScreen);
+  // lv_scr_load(SettingsScreen);
+
   Edit_device_wifi();
   EepromStream eeprom(0, 1024);           // ประกาศ Object eepromSteam ที่ Address 0 ขนาด 1024 byte
   deserializeJson(jsonDoc, eeprom);       // คือการรับหรืออ่านข้อมูล jsonDoc ใน eeprom
@@ -1216,7 +1472,7 @@ void setup() {
   xTaskCreatePinnedToCore(TaskWifiStatus, "WifiStatus", 4096, NULL, 1, &WifiStatus, 1);
   xTaskCreatePinnedToCore(TaskWaitSerial, "WaitSerial", 8192, NULL, 1, &WaitSerial, 1);
   setAll_config();
-  delay(500);
+  // delay(500);
   sensorValue_soil_moisture = analogRead(Soil_moisture_sensorPin);
   voltageValue_soil_moisture = (sensorValue_soil_moisture * 3.3) / (4095.00);
   ma_soil[0] = ma_soil[1] = ma_soil[2] = ma_soil[3] = ma_soil[4] = ((-58.82) * voltageValue_soil_moisture) + 123.52;
@@ -1303,7 +1559,7 @@ void TaskWifiStatus(void * pvParameters) {
     WiFi.begin(ssid.c_str(), password.c_str());   
      
     while (WiFi.status() != WL_CONNECTED) {
-      DEBUG_PRINTLN("WIFI Not connect !!!");
+      // DEBUG_PRINTLN("WIFI Not connect !!!");
 
       /* -- ESP Reset -- */
       if (millis() - time_restart > INTERVAL_MESSAGE2) { // ผ่านไป 1 ชม. ยังไม่ได้เชื่อมต่อ Wifi ให้ Reset ตัวเอง
