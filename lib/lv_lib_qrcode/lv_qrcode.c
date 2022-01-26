@@ -8,6 +8,7 @@
  *********************/
 #include "lv_qrcode.h"
 #include "qrcodegen.h"
+#include <stdlib.h>
 
 /*********************
  *      DEFINES
@@ -46,10 +47,12 @@ lv_obj_t * lv_qrcode_create(lv_obj_t * parent, lv_coord_t size, lv_color_t dark_
 {
    uint32_t buf_size = LV_CANVAS_BUF_SIZE_INDEXED_1BIT(size, size);
    uint8_t * buf = lv_mem_alloc(buf_size);
-   LV_ASSERT_MALLOC(buf);
+   // uint8_t * buf = (uint8_t*)malloc(buf_size);
+   // LV_ASSERT_MALLOC(buf);
    if(buf == NULL) return NULL;
 
-   lv_obj_t * canvas = lv_canvas_create(parent);
+   // lv_obj_t * canvas = lv_canvas_create(parent);
+   lv_obj_t * canvas = lv_canvas_create(parent, NULL);
    if(canvas == NULL) return NULL;
 
    lv_canvas_set_buffer(canvas, buf, size, size, LV_IMG_CF_INDEXED_1BIT);
@@ -71,7 +74,8 @@ lv_res_t lv_qrcode_update(lv_obj_t * qrcode, const void * data, uint32_t data_le
 {
     lv_color_t c;
     c.full = 1;
-    lv_canvas_fill_bg(qrcode, c, LV_OPA_COVER);
+    // lv_canvas_fill_bg(qrcode, c, LV_OPA_COVER);
+    lv_canvas_fill_bg(qrcode, c);
 
     if(data_len > qrcodegen_BUFFER_LEN_MAX) return LV_RES_INV;
 
@@ -79,13 +83,14 @@ lv_res_t lv_qrcode_update(lv_obj_t * qrcode, const void * data, uint32_t data_le
     uint8_t data_tmp[qrcodegen_BUFFER_LEN_MAX];
     memcpy(data_tmp, data, data_len);
 
+ 
+
     bool ok = qrcodegen_encodeBinary(data_tmp, data_len,
             qr0, qrcodegen_Ecc_MEDIUM,
             qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX,
             qrcodegen_Mask_AUTO, true);
 
     if (!ok) return LV_RES_INV;
-
 
     lv_img_dsc_t * imgdsc = lv_canvas_get_img(qrcode);
     lv_coord_t obj_w = imgdsc->header.w;
