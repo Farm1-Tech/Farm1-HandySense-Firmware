@@ -75,16 +75,10 @@ void Edit_device_wifi() {
   Serial.write(ETX);                      // 03 คือจบ
 }
 
-/* --------- Auto Connect Serial ------------- */
-void TaskWaitSerial(void*) {
+void HandySenseWebSerial_begin() {
   Edit_device_wifi();
-
-  while (1) {
-    webSerialJSON();
-    delay(50);
-  }
 }
 
-void HandySenseWebSerial_begin() {
-  xTaskCreatePinnedToCore(TaskWaitSerial, "WaitSerial", 8192, NULL, 0, NULL, 1);
+void HandySenseWebSerial_runCycle() {
+  webSerialJSON();
 }

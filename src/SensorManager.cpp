@@ -494,10 +494,15 @@ float soil_value = 0.0;
 float light_value = 0.0;
 
 void SensorManager_runCycle() {
-  temp_value = temp->getValue(TYPE_TEMPERATURE);
-  humi_value = humi->getValue(TYPE_HUMIDITY);
-  soil_value = soil->getValue(TYPE_SOIL);
-  light_value = light->getValue(TYPE_LIGHT);
+  static uint64_t sensor_read_timer = 0;
+  if (((millis() - sensor_read_timer) >= 1000) || (sensor_read_timer == 0)) {
+    temp_value = temp->getValue(TYPE_TEMPERATURE);
+    humi_value = humi->getValue(TYPE_HUMIDITY);
+    soil_value = soil->getValue(TYPE_SOIL);
+    light_value = light->getValue(TYPE_LIGHT);
+
+    sensor_read_timer = millis();
+  }
 }
 
 float Sensor_get_temp() {

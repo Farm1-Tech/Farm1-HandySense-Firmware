@@ -223,8 +223,8 @@ void ControlRelay_Bytimmer() {
   static char time_str_buff[20];
   sprintf(time_str_buff, "%02d:%02d:%02d", 
                           timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  lv_label_set_text(txtTime, time_str_buff);
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);
+  /*lv_label_set_text(txtTime, time_str_buff);
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);*/
 
   //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
   /* check curentTimer => 0-1440 */
@@ -472,19 +472,8 @@ void setup() {
 
 void loop() {
   SensorManager_runCycle();
-
+  NETPIE_runCycle();
+  HandySenseWebSerial_runCycle();
   Display_runCycle();
-  
-
   delay(1);
-  unsigned long currentTime_Update_data = millis();
-  if (previousTime_Update_data == 0 || (currentTime_Update_data - previousTime_Update_data >= (eventInterval_publishData))) {
-    //check_sendData_toWeb = 1;
-    UpdateData_To_Server();
-    previousTime_Update_data = currentTime_Update_data;
-    soil_old = soil;
-    temp_old = temp;
-  }
 }
-
-

@@ -1,3 +1,5 @@
 #include <Arduino.h>
 
-void UpdateData_To_Server();
+void NETPIE_begin() ;
+void NETPIE_runCycle() ;
+
