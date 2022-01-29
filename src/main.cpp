@@ -1,122 +1,17 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
-#include <NTPClient.h>
-#include <PubSubClient.h>
-#include <WiFiUdp.h>
 #include <ArduinoJson.h>
-#include <EEPROM.h>
-#include <StreamUtils.h>
-// #include "Adafruit_SHT31.h"
-#include <BH1750.h>
-#include "Max44009.h"
-// #include "RTClib.h"
-#include "time.h"
-#include <WiFiClient.h>
-#include <WebServer.h>
-#include <ESPmDNS.h>
-#include <Update.h>
-#include <SPI.h>
-#include "Artron_SHT20.h"
-#include <TFT_eSPI.h>
-#include <lvgl.h>
-#include <lv_qrcode.h>
+#include <FS.h>
+#include <SPIFFS.h>
 
 #include "HandySenseWebSerial.h"
 #include "NETPIE.h"
 #include "TimeManager.h"
+#include "SensorManager.h"
+#include "Display.h"
 
 #include "debug.h"
-
-#define LCD_BL_PIN 32
-
-TFT_eSPI tft = TFT_eSPI();
-
-static lv_disp_buf_t disp_buf;
-static lv_color_t buf[LV_HOR_RES_MAX * 10];
-
-/* Display flushing */
-void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-  uint32_t w = (area->x2 - area->x1 + 1);
-  uint32_t h = (area->y2 - area->y1 + 1);
-
-  tft.startWrite();
-  tft.setAddrWindow(area->x1, area->y1, w, h);
-  tft.pushColors(&color_p->full, w * h, true);
-  tft.endWrite();
-
-  lv_disp_flush_ready(disp);
-}
-
-
-struct {
-  uint16_t max_x = 0;
-  uint16_t max_y = 0;
-  uint16_t min_x = 0;
-  uint16_t min_y = 0;
-} TouchCalibration;
-
-bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
-  uint16_t x = 0, y = 0;
-  // bool touched = tft.getTouch(&x, &y, 500);
-
-  // uint16_t x, y;
-  tft.getTouchRaw(&y, &x); // Axis wrong
-  bool touched = (x > 10) && (y > 10);
-  // Serial.printf("raw_x: %5d\traw_y: %5d\n", x, y);
-
-  x = map(x, TouchCalibration.min_x, TouchCalibration.max_x, 28, 320 - 28);
-  y = map(y, TouchCalibration.min_y, TouchCalibration.max_y, 28, 240 - 28);
-
-  if (touched) {
-    uint16_t xOld = x, yOld = y;
-    y += 22.0 / 152.0 * xOld;
-    //Serial.printf("Press: %d, %d\n", x, y);
-    delay(50);
-  } else {
-    //Serial.println("No Press");
-  }
-
-  data->point.x = x;
-  data->point.y = y;
-  data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
-  
-  return false; /*No buffering now so no more data read*/
-}
-
-extern void load_page_main() ;
-
-extern lv_obj_t* MainScreen;
-
-extern lv_obj_t* txtTime;
-extern lv_obj_t* imgWiFi;
-extern lv_obj_t* imgNexpie;
-
-extern lv_obj_t* txtTemp;
-extern lv_obj_t* txtHumi;
-extern lv_obj_t* txtHumi2;
-extern lv_obj_t* txtLight;
-
-extern void load_page_settings() ;
-
-extern lv_obj_t* SettingsScreen;
-
-extern lv_obj_t* objBoxQRCode;
-lv_obj_t* wifiConnectQRCode;
-
-extern lv_obj_t* txtWiFiSSID;
-extern lv_obj_t* txtWiFiPassword;
-
-extern void load_page_touch_calibration() ;
-extern lv_obj_t* TouchCalibrationScreen;
-
-extern lv_obj_t* objTopLeftTouchPoint;
-extern lv_obj_t* objBottomLeftTouchPoint;
-extern lv_obj_t* objBottomRightTouchPoint;
-extern lv_obj_t* objRightLeftTouchPoint;
-
-extern lv_obj_t* txtTouchCalibrationStep;
-extern lv_obj_t* txtTouchCalibrationCountdown;
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
@@ -130,20 +25,6 @@ void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 
 const size_t capacity = JSON_OBJECT_SIZE(7) + 320;
 DynamicJsonDocument jsonDoc(capacity);
-
-// ประกาศตัวแปรเรียกใช้ Max44009
-// Max44009 myLux(0x4A);
-BH1750 lightMeter(0x23); // ADDR connect to GND
-
-// ประกาศตัวแปรเรียกใช้ SHT31
-// Adafruit_SHT31 sht31 = Adafruit_SHT31();
-Artron_SHT20 sht(&Wire);
-
-// ประกาศตัวแปรเก็บค่า Soil_moisture_sensor
-#define Soil_moisture_sensorPin   A0
-float sensorValue_soil_moisture   = 0.00,
-      voltageValue_soil_moisture  = 0.00,
-      percent_soil_moisture       = 0.00;
 
 // ประกาศเพื่อเก็บข้อมูล Min Max ของค่าเซ็นเซอร์ Temp และ Soil
 char msg_Minsoil[100],
@@ -511,156 +392,6 @@ void ControlRelay_BytempMinMax() {
   }
 }
 
-/* ----------------------- Mode for calculator sensor i2c --------------------------- */
-int Mode(float* getdata) {
-  int maxValue = 0;
-  int maxCount = 0;
-  for (int i = 0; i < sizeof(getdata); ++i) {
-    int count = 0;
-    for (int j = 0; j < sizeof(getdata); ++j) {
-      if (round(getdata[j]) == round(getdata[i]))
-        ++count;
-    }
-    if (count > maxCount) {
-      maxCount = count;
-      maxValue = round(getdata[i]);
-    }
-  }
-  return maxValue;
-}
-
-/* ----------------------- Calculator sensor SHT31  --------------------------- */
-void Get_sht() {
-  float buffer_temp = 0;
-  float buffer_hum  = 0;
-  float temp_cal    = 0;
-  int num_temp      = 0;
-  buffer_temp = sht.readTemperature();
-  buffer_hum = sht.readHumidity();
-  if (buffer_temp < -40 || buffer_temp > 125 || isnan(buffer_temp)) { // range -40 to 125 C
-    if (temp_error_count >= 10) {
-      temp_error = 1;
-      DEBUG_PRINT("temp_error : "); DEBUG_PRINTLN(temp_error);
-    } else {
-      temp_error_count++;
-    }
-    DEBUG_PRINT("temp_error_count  : "); DEBUG_PRINTLN(temp_error_count);
-  } else {
-    ma_temp[4] = ma_temp[3];
-    ma_temp[3] = ma_temp[2];
-    ma_temp[2] = ma_temp[1];
-    ma_temp[1] = ma_temp[0];
-    ma_temp[0] = buffer_temp;
-
-    int mode_value_temp = Mode(ma_temp);
-    for (int i = 0; i < sizeof(ma_temp); i++) {
-      if (abs(mode_value_temp - ma_temp[i]) < 1) {
-        temp_cal = temp_cal + ma_temp[i];
-        num_temp++;
-      }
-    }
-    temp = temp_cal / num_temp;
-    temp_error = 0;
-    temp_error_count = 0;
-  }
-  float hum_cal     = 0;
-  int num_hum       = 0;
-  if (buffer_hum < 0 || buffer_hum > 100  || isnan(buffer_hum)) { // range 0 to 100 %RH
-    if (hum_error_count >= 10) {
-      hum_error = 1;
-      DEBUG_PRINT("hum_error  : "); DEBUG_PRINTLN(hum_error);
-    } else {
-      hum_error_count++;
-    }
-    DEBUG_PRINT("hum_error_count  : "); DEBUG_PRINTLN(hum_error_count);
-  } else {
-    ma_hum[4] = ma_hum[3];
-    ma_hum[3] = ma_hum[2];
-    ma_hum[2] = ma_hum[1];
-    ma_hum[1] = ma_hum[0];
-    ma_hum[0] = buffer_hum;
-
-    int mode_value_hum = Mode(ma_hum);
-    for (int j = 0; j < sizeof(ma_hum); j++) {
-      if (abs(mode_value_hum - ma_hum[j]) < 1) {
-        hum_cal = hum_cal + ma_hum[j];
-        num_hum++;
-      }
-    }
-    humidity = hum_cal / num_hum;
-    hum_error = 0;
-    hum_error_count = 0;
-  }
-}
-
-/* ----------------------- Calculator sensor Max44009 --------------------------- */
-void Get_max44009() {
-  float buffer_lux  = 0;
-  float lux_cal     = 0;
-  int num_lux       = 0;
-  // buffer_lux = myLux.getLux() / 1000;
-  buffer_lux = lightMeter.readLightLevel() / 1000.0; // lux to klux
-
-  if (buffer_lux < 0 || buffer_lux > 188000 || isnan(buffer_lux)) { // range 0.045 to 188,000 lux
-    if (lux_error_count >= 10) {
-      lux_error = 1;
-      DEBUG_PRINT("lux_error  : "); DEBUG_PRINTLN(lux_error);
-    } else {
-      lux_error_count++;
-    }
-    DEBUG_PRINT("lux_error_count  : "); DEBUG_PRINTLN(lux_error_count);
-  } else {
-    ma_lux[4] = ma_lux[3];
-    ma_lux[3] = ma_lux[2];
-    ma_lux[2] = ma_lux[1];
-    ma_lux[1] = ma_lux[0];
-    ma_lux[0] = buffer_lux;
-
-    int mode_value_lux = Mode(ma_lux);
-    for (int i = 0; i < sizeof(ma_lux); i++) {
-      if (abs(mode_value_lux - ma_lux[i]) < 1) {
-        lux_cal = lux_cal + ma_lux[i];
-        num_lux++;
-      }
-    }
-    lux_44009 = lux_cal / num_lux;
-    lux_error = 0;
-    lux_error_count = 0;
-  }
-}
-
-/* ----------------------- Calculator sensor Soil  --------------------------- */
-void Get_soil() {
-  float buffer_soil = 0;
-  sensorValue_soil_moisture = analogRead(Soil_moisture_sensorPin);
-  voltageValue_soil_moisture = (sensorValue_soil_moisture * 3.3) / (4095.00);
-  buffer_soil = ((-58.82) * voltageValue_soil_moisture) + 123.52;
-  if (buffer_soil < 0 || buffer_soil > 100 || isnan(buffer_soil)) { // range 0 to 100 %
-    if (soil_error_count >= 10) {
-      soil_error = 1;
-      DEBUG_PRINT("soil_error : "); DEBUG_PRINTLN(soil_error);
-    } else {
-      soil_error_count++;
-    }
-    DEBUG_PRINT("soil_error_count  : "); DEBUG_PRINTLN(soil_error_count);
-  } else {
-    ma_soil[4] = ma_soil[3];
-    ma_soil[3] = ma_soil[2];
-    ma_soil[2] = ma_soil[1];
-    ma_soil[1] = ma_soil[0];
-    ma_soil[0] = buffer_soil;
-    soil = (ma_soil[0] + ma_soil[1] + ma_soil[2] + ma_soil[3] + ma_soil[4]) / 5;
-    if (soil <= 0) {
-      soil = 0;
-    }
-    else if (soil >= 100) {
-      soil = 100;
-    }
-    soil_error = 0;
-    soil_error_count = 0;
-  }
-}
-
 /* ----------------------- Set All Config --------------------------- */
 void setAll_config() {
   for (int b = 0; b < 4; b++) {
@@ -708,172 +439,12 @@ void setAll_config() {
   }
 }
 
-
-void btnGoToSettingsHandle(lv_obj_t *obj, lv_event_t event) {
-  if(event == LV_EVENT_CLICKED) {
-    String qr_code_str = "WIFI:T:WPA;S:Farm1;P:123456789;;";
-    lv_qrcode_update(wifiConnectQRCode, (char*)qr_code_str.c_str(), qr_code_str.length());
-    lv_scr_load(SettingsScreen);
-  }
-}
-
-void SettingsScreenGoBackHandle(lv_obj_t *obj, lv_event_t event) {
-  if(event == LV_EVENT_CLICKED) {
-    lv_scr_load(MainScreen);
-  }
-}
-
-void do_touch_calibration() {
-  uint8_t state = 0;
-  uint16_t i = 0;
-  uint32_t posXsum = 0, posYsum = 0;
-  uint8_t posSample = 0;
-  while(1) {
-    lv_task_handler(); /* let the GUI do its work */
-    
-    uint16_t x, y;
-    // tft.getTouchRaw(&x, &y);
-    tft.getTouchRaw(&y, &x); // Axis wrong
-    // Serial.printf("x: %5d\ty: %5d\n", x, y);
-    /* Serial.printf("x: %i     ", x);
-    Serial.printf("y: %i     ", y);
-    Serial.printf("z: %i \n", tft.getTouchRawZ());*/
-    bool isPressed = (x > 0) && (y > 0);
-    
-    if (state == 0) {
-      // Hide all point
-      lv_obj_set_hidden(objTopLeftTouchPoint, true);
-      lv_obj_set_hidden(objBottomLeftTouchPoint, true);
-      lv_obj_set_hidden(objBottomRightTouchPoint, true);
-      lv_obj_set_hidden(objRightLeftTouchPoint, true);
-      
-      lv_label_set_text(txtTouchCalibrationStep, "");
-
-      // Hide countdown
-      lv_obj_set_hidden(txtTouchCalibrationCountdown, true);
-
-      // Show touch calibration screen
-      lv_scr_load(TouchCalibrationScreen);
-      state = 1;
-    }
-    if (state == 1) {
-      lv_obj_set_hidden(objTopLeftTouchPoint, false);
-      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านบนซ้ายค้างไว้");
-      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-
-      state = 2;
-    }
-    if (state == 2) {
-      if (isPressed) {
-        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
-        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-
-        i = 0;
-        posXsum = 0;
-        posYsum = 0;
-        posSample = 0;
-        state = 3;
-      }
-    }
-    if (state == 3) {
-      if (isPressed) {
-        if (i >= 20) {
-          posXsum += x;
-          posYsum += y;
-          posSample++;
-          if (posSample >= 10) {
-            TouchCalibration.min_x = (float)posXsum / (float)posSample;
-            TouchCalibration.min_y = (float)posYsum / (float)posSample;
-
-            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
-            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-            lv_obj_set_hidden(objTopLeftTouchPoint, true);
-
-            i = 0;
-            state = 4;
-          }
-        }
-        i++;
-      } else {
-        state = 1;
-      }
-    }
-    if (state == 4) {
-      if (!isPressed) {
-        i++;
-        if (i > 100) {
-          state = 5;
-        }
-      }
-    }
-    if (state == 5) {
-      lv_obj_set_hidden(objBottomRightTouchPoint, false);
-      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านล่างขวาค้างไว้");
-      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-
-      state = 6;
-    }
-    if (state == 6) {
-      if (isPressed) {
-        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
-        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-
-        i = 0;
-        posXsum = 0;
-        posYsum = 0;
-        posSample = 0;
-        state = 7;
-      }
-    }
-    if (state == 7) {
-      if (isPressed) {
-        if (i >= 20) {
-          posXsum += x;
-          posYsum += y;
-          posSample++;
-          if (posSample >= 10) {
-            TouchCalibration.max_x = (float)posXsum / (float)posSample;
-            TouchCalibration.max_y = (float)posYsum / (float)posSample;
-
-            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
-            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
-            lv_obj_set_hidden(objBottomRightTouchPoint, true);
-
-            i = 0;
-            state = 8;
-          }
-        }
-        i++;
-      } else {
-        state = 5;
-      }
-    }
-    if (state == 8) {
-      if (!isPressed) {
-        i++;
-        if (i > 100) {
-          state = 9;
-        }
-      }
-    }
-    if (state == 9) {
-      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.min_x, TouchCalibration.min_y);
-      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.max_x, TouchCalibration.max_y);
-      break;
-    }
-
-    delay(5);
-  }
-}
-
 void setup() {
   Serial.begin(115200);
   EEPROM.begin(4096);
   Wire.begin();
   Wire.setClock(10000);
-  
-  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
-  pinMode(Soil_moisture_sensorPin, INPUT);
+
   pinMode(relay_pin[0], OUTPUT);
   pinMode(relay_pin[1], OUTPUT);
   pinMode(relay_pin[2], OUTPUT);
@@ -882,134 +453,30 @@ void setup() {
   digitalWrite(relay_pin[1], LOW);
   digitalWrite(relay_pin[2], LOW);
   digitalWrite(relay_pin[3], LOW);
-  // if (!sht31.begin(0x44)) {
-  if (!sht.begin()) {
-    Serial.println("Init SHT20 error, Sensor not connect ?");
-  }
-
-  tft.begin(); /* TFT init */
-  tft.setRotation(3); /* Landscape orientation */
-
-  lv_init();
-
-  lv_disp_buf_init(&disp_buf, buf, NULL, LV_HOR_RES_MAX * 10);
-
-  /*Initialize the display*/
-  lv_disp_drv_t disp_drv;
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.hor_res = 320;
-  disp_drv.ver_res = 240;
-  disp_drv.flush_cb = my_disp_flush;
-  disp_drv.buffer = &disp_buf;
-  lv_disp_drv_register(&disp_drv);
-
-  load_page_main();
-  load_page_settings();
-  load_page_touch_calibration();
-
-  // Set all label
-  lv_label_set_text(txtTime, "LOADING");
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
-
-  lv_obj_set_hidden(imgWiFi, false);
-  lv_obj_set_hidden(imgNexpie, false);
-
-  lv_label_set_text(txtTemp, "");
-  lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
-
-  lv_label_set_text(txtHumi, "");
-  lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
-
-  lv_label_set_text(txtHumi2, "");
-  lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
-
-  lv_label_set_text(txtLight, "");
-  lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
-
-  pinMode(LCD_BL_PIN, OUTPUT);
-  digitalWrite(LCD_BL_PIN, LOW);
-
-  do_touch_calibration();
-
-  /*Initialize the (dummy) input device driver*/
-  lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = my_input_read;
-  lv_indev_drv_register(&indev_drv);
-
-  lv_scr_load(MainScreen);
-  // lv_scr_load(SettingsScreen);
-
-  wifiConnectQRCode = lv_qrcode_create(objBoxQRCode, 150, lv_color_hex(0x000000), lv_color_hex(0xFFFFFF));
-  lv_obj_align(wifiConnectQRCode, NULL, LV_ALIGN_CENTER, 0, 0);
   
   // Handle all command from HandySense via Serial
   HandySenseWebSerial_begin();
+  
+  // Init Sensor
+  SensorManager_begin();
 
+  // Init RTC & NTP
+  Time_begin();
+
+  // Init TFT LCD & LVGL
+  Display_begin();
   
   
   setAll_config();
-  // delay(500);
-  sensorValue_soil_moisture = analogRead(Soil_moisture_sensorPin);
-  voltageValue_soil_moisture = (sensorValue_soil_moisture * 3.3) / (4095.00);
-  ma_soil[0] = ma_soil[1] = ma_soil[2] = ma_soil[3] = ma_soil[4] = ((-58.82) * voltageValue_soil_moisture) + 123.52;
-  ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht.readTemperature();
-  ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht.readHumidity();
-  // ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = myLux.getLux() / 1000;
-  ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = lightMeter.readLightLevel() / 1000; // lux to klux
 }
 
 void loop() {
-  lv_task_handler(); /* let the GUI do its work */
+  SensorManager_runCycle();
+
+  Display_runCycle();
   
 
   delay(1);
-  unsigned long currentTime = millis();
-  if (currentTime - previousTime_Temp_soil >= eventInterval) {
-    ControlRelay_Bytimmer();
-    ControlRelay_BysoilMinMax();
-    ControlRelay_BytempMinMax();
-
-    DEBUG_PRINTLN("");
-    DEBUG_PRINT("Temp : ");       DEBUG_PRINT(temp);      DEBUG_PRINT(" C, ");
-    DEBUG_PRINT("Hum  : ");       DEBUG_PRINT(humidity);  DEBUG_PRINT(" %RH, ");
-    DEBUG_PRINT("Brightness : "); DEBUG_PRINT(lux_44009); DEBUG_PRINT(" Klux, ");
-    DEBUG_PRINT("Soil  : ");      DEBUG_PRINT(soil);      DEBUG_PRINTLN(" %");
-
-    lv_label_set_text(txtTemp, String(temp, 1).c_str());
-    lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
-
-    lv_label_set_text(txtHumi, String(humidity, 1).c_str());
-    lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
-
-    lv_label_set_text(txtHumi2, String(soil, 1).c_str());
-    lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
-
-    lv_label_set_text(txtLight, String(lux_44009, 1).c_str());
-    lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
-
-    previousTime_Temp_soil = currentTime;
-  }
-  static unsigned long previousTime_wifi_connect = 0;
-  if ((previousTime_wifi_connect == 0) || ((currentTime - previousTime_wifi_connect) >= 300)) {
-    if (WiFi.isConnected()) {
-      lv_obj_set_hidden(imgWiFi, false);
-      /*if (client.connected()) {
-        lv_obj_set_hidden(imgNexpie, false);
-      } else {
-        lv_obj_set_hidden(imgNexpie, !lv_obj_get_hidden(imgNexpie));
-      }*/
-    } else {
-      lv_obj_set_hidden(imgWiFi, !lv_obj_get_hidden(imgWiFi));
-      lv_obj_set_hidden(imgNexpie, true);
-    }
-    previousTime_wifi_connect = currentTime;
-  }
-  if (currentTime - previousTime_brightness >= eventInterval_brightness) {
-    Get_max44009();
-    previousTime_brightness = currentTime;
-  }
   unsigned long currentTime_Update_data = millis();
   if (previousTime_Update_data == 0 || (currentTime_Update_data - previousTime_Update_data >= (eventInterval_publishData))) {
     //check_sendData_toWeb = 1;
