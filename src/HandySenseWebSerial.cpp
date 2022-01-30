@@ -1,84 +1,72 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <EEPROM.h>
-#include <StreamUtils.h>
 
-String client_old;
+#include "MemConfigs.h"
+#include "debug.h"
 
 // ประกาศตัวแปรสื่อสารกับ web App
 byte STX = 02;
 byte ETX = 03;
-uint8_t START_PATTERN[3] = {0, 111, 222};
-extern DynamicJsonDocument jsonDoc;
+uint8_t START_PATTERN[3] = { 0, 111, 222 };
 
-/* ----------------------- Delete All Config --------------------------- */
-void Delete_All_config() {
-  for (int b = 2000; b < 4096; b++) {
-    EEPROM.write(b, 255);
-    EEPROM.commit();
-  }
+void HandySenseWebSerial_begin() {
+  Serial.setTimeout(1000); // Timeout of read from Serial
+
+  // Send WiFi configs in SPIFFS to HandySense
+  JsonObject wifiConfigs = getWiFiConfigs()->as<JsonObject>();
+
+  // Send start to Web
+  Serial.write(START_PATTERN, 3);
+  Serial.write(STX);
+
+  // Send real content
+  Serial.printf(
+    "{\"ssid\": \"%s\", \"password\": \"%s\", \"server\": \"%s\", \"port\": %d, \"client\": \"%s\", \"user\": \"%s\", \"pass\": \"%s\"}",
+    wifiConfigs["wifi_ssid"].as<const char*>(), 
+    wifiConfigs["wifi_password"].as<const char*>(), 
+    wifiConfigs["mqtt_host"].as<const char*>(), 
+    wifiConfigs["mqtt_port"].as<int>(), 
+    wifiConfigs["mqtt_client"].as<const char*>(), 
+    wifiConfigs["mqtt_username"].as<const char*>(), 
+    wifiConfigs["mqtt_password"].as<const char*>()
+  );
+
+  // Send END to Web
+  Serial.write(ETX);
 }
 
-/* -------- webSerialJSON function ------- */
-void webSerialJSON() {
-  while (Serial.available() > 0) {
-    Serial.setTimeout(10000);
-    EepromStream eeprom(0, 1024);
+void HandySenseWebSerial_runCycle() {
+  if (Serial.available() > 0) {
+    DynamicJsonDocument jsonDoc(2 * 1024);
     DeserializationError err = deserializeJson(jsonDoc, Serial);
     if (err == DeserializationError::Ok) {
       String command  =  jsonDoc["command"].as<String>();
       bool isValidData  =  !jsonDoc["client"].isNull();
       if (command == "restart") {
+        jsonDoc.clear();
         delay(100);
         ESP.restart();
-      }
-      if (isValidData) {
-        /* ------------------WRITING----------------- */
-        serializeJson(jsonDoc, eeprom);
-        eeprom.flush();
-        // ถ้าไม่เหมือนคือเพิ่มอุปกรณ์ใหม่ // ถ้าเหมือนคือการเปลี่ยน wifi
-        if (client_old != jsonDoc["client"].as<String>()) {
-          Delete_All_config();
+        return;
+      } else {
+        if (isValidData) {
+          DynamicJsonDocument *wifiConfigs = getWiFiConfigs();
+
+          // WiFi configs
+          wifiConfigs->getMember("wifi_ssid").set(jsonDoc["ssid"].as<const char*>());
+          wifiConfigs->getMember("wifi_password").set(jsonDoc["password"].as<const char*>());
+
+          // MQTT configs
+          wifiConfigs->getMember("mqtt_host").set(jsonDoc["server"].as<const char*>());
+          wifiConfigs->getMember("mqtt_port").set(jsonDoc["port"].as<int>());
+          wifiConfigs->getMember("mqtt_client").set(jsonDoc["client"].as<const char*>());
+          wifiConfigs->getMember("mqtt_username").set(jsonDoc["user"].as<const char*>());
+          wifiConfigs->getMember("mqtt_password").set(jsonDoc["pass"].as<const char*>());
+        } else {
+          DEBUG_PRINTLN("Unknow command");
         }
-        delay(100);
-        ESP.restart();
       }
-    }  else  {
-      Serial.read();
+    } else {
+      DEBUG_PRINTLN("JSON deserialize fail");
     }
   }
-}
-
-/* ----------------------- Add and Edit device || Edit Wifi --------------------------- */
-void Edit_device_wifi() {
-  EepromStream eeprom(0, 1024);
-  Serial.write(START_PATTERN, 3);               // ส่งข้อมูลชนิดไบต์ ส่งตัวอักษรไปบนเว็บ
-  Serial.flush();                               // เครียบัฟเฟอร์ให้ว่าง
-  deserializeJson(jsonDoc, eeprom);             // คือการรับหรืออ่านข้อมูล jsonDoc ใน eeprom
-  client_old = jsonDoc["client"].as<String>();  // เก็บค่า client เก่าเพื่อเช็คกับ client ใหม่ ในการ reset Wifi ไม่ให้ลบค่า Config อื่นๆ
-  Serial.write(STX);                            // 02 คือเริ่มส่ง
-  serializeJsonPretty(jsonDoc, Serial);         // ส่งข่อมูลของ jsonDoc ไปบนเว็บ
-  Serial.write(ETX);
-  delay(1000);
-  Serial.write(START_PATTERN, 3);               // ส่งข้อมูลชนิดไบต์ ส่งตัวอักษรไปบนเว็บ
-  Serial.flush();
-  jsonDoc["server"]   = NULL;
-  jsonDoc["client"]   = NULL;
-  jsonDoc["pass"]     = NULL;
-  jsonDoc["user"]     = NULL;
-  jsonDoc["password"] = NULL;
-  jsonDoc["port"]     = NULL;
-  jsonDoc["ssid"]     = NULL;
-  jsonDoc["command"]  = NULL;
-  Serial.write(STX);                      // 02 คือเริ่มส่ง
-  serializeJsonPretty(jsonDoc, Serial);   // ส่งข่อมูลของ jsonDoc ไปบนเว็บ
-  Serial.write(ETX);                      // 03 คือจบ
-}
-
-void HandySenseWebSerial_begin() {
-  Edit_device_wifi();
-}
-
-void HandySenseWebSerial_runCycle() {
-  webSerialJSON();
 }

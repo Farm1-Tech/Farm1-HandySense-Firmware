@@ -5,8 +5,10 @@
 #include <EEPROM.h>
 #include <StreamUtils.h>
 
+#include "Farm1.h"
 #include "TimeManager.h"
 #include "SensorManager.h"
+#include "MemConfigs.h"
 
 #include "debug.h"
 
@@ -82,9 +84,9 @@ void sent_dataTimer(String topic, String message) {
 /* --------- UpdateData_To_Server --------- */
 void UpdateData_To_Server() {
   String _payload = "{\"data\": {" \
-                      "\"temperature\":" + String(Sensor_get_temp()) + "," \
-                      "\"humidity\":" + String(Sensor_get_humi()) + "," \ 
-                      "\"lux\":" + String(Sensor_get_lux() / 1000.0) + "," + \
+                      "\"temperature\":" + String(Sensor_get_temp()) + ","
+                      "\"humidity\":" + String(Sensor_get_humi()) + "," 
+                      "\"lux\":" + String(Sensor_get_lux() / 1000.0) + ","
                       "\"soil\":" + String(Sensor_get_soil()) + \
                     "}}";
   DEBUG_PRINT("DatatoWeb : ");
@@ -97,10 +99,10 @@ void UpdateData_To_Server() {
 /* --------- sendStatus_RelaytoWeb --------- */
 void sendStatus_RelaytoWeb() {
   if (check_sendData_status == 1) {
-    String _payload = "{\"data\": {\"led0\":\"" + String(RelayStatus[0]) +
-               "\",\"led1\":\"" + String(RelayStatus[1]) +
-               "\",\"led2\":\"" + String(RelayStatus[2]) +
-               "\",\"led3\":\"" + String(RelayStatus[3]) + "\"}}";
+    String _payload = "{\"data\": {\"led0\":\"" + String(digitalRead(O1)) +
+               "\",\"led1\":\"" + String(digitalRead(O2)) +
+               "\",\"led2\":\"" + String(digitalRead(O3)) +
+               "\",\"led3\":\"" + String(digitalRead(O4)) + "\"}}";
     DEBUG_PRINT("_payload : ");
     DEBUG_PRINTLN(_payload);
     if (client.publish("@shadow/data/update", _payload.c_str())) {
@@ -171,15 +173,29 @@ void NETPIEManagerTask(void*) {
   client.setBufferSize(4 * 1024); // 4 kBytes
   client.setCallback(callback);
 
+  // Get WiFi Configs
+  DynamicJsonDocument *wifiConfigs = getWiFiConfigs();
+
   while (1) {
     delay(20);
 
     if (!WiFi.isConnected()) {
       wifiDisconnectFlag = false;
-      if (configWiFiPassword.length() > 5) {
-        // WiFi.begin(configWiFiSSID.c_str(), configWiFiPassword.c_str());
-      } else {
-        // WiFi.begin(configWiFiSSID.c_str());
+      const char* wifiSSID = wifiConfigs->getMember("wifi_ssid").as<const char*>();
+      const char* wifiPassword = wifiConfigs->getMember("wifi_password").as<const char*>();
+
+      if ((!wifiSSID) || (*wifiSSID == 0) || (strlen(wifiSSID) <= 0)) {
+        // Serial.printf("WiFi Name: %s\n", wifiSSID);
+        // DEBUG_PRINTLN("WiFi not configs");
+        delay(100);
+        continue;
+      }
+
+      // Start WiFi connect
+      if (WiFi.begin(wifiSSID, strlen(wifiPassword) > 5 ? wifiPassword : NULL) == WL_CONNECT_FAILED) {
+        DEBUG_PRINTLN("WiFi begin fail");
+        delay(500);
+        continue;
       }
       
       // Wait WiFi connect or disconnect
@@ -198,9 +214,15 @@ void NETPIEManagerTask(void*) {
     }
 
     if (!client.connected()) {
+      const char* mqttHost = wifiConfigs->getMember("mqtt_host").as<const char*>();
+      int mqttPort = wifiConfigs->getMember("mqtt_port").as<int>();
+      const char* mqttClient = wifiConfigs->getMember("mqtt_client").as<const char*>();
+      const char* mqttUsername = wifiConfigs->getMember("mqtt_username").as<const char*>();
+      const char* mqttPassword = wifiConfigs->getMember("mqtt_password").as<const char*>();
+
       Serial.print("Attempting MQTT connection... ");
-      client.setServer(mqtt_server.c_str(), mqtt_port.toInt());
-      if (client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str())) {
+      client.setServer(mqttHost, mqttPort);
+      if (client.connect(mqttClient, mqttUsername, mqttPassword)) {
         Serial.println("connected");
 
         // Subscribe
@@ -227,6 +249,8 @@ void NETPIEManagerTask(void*) {
 
     client.loop();
   }
+
+  vTaskDelete(NULL);
 }
 
 void NETPIE_begin() {

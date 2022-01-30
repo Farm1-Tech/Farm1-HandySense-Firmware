@@ -5,6 +5,8 @@
 #include <FS.h>
 #include <SPIFFS.h>
 
+#include "Farm1.h"
+#include "MemConfigs.h"
 #include "HandySenseWebSerial.h"
 #include "NETPIE.h"
 #include "TimeManager.h"
@@ -23,9 +25,6 @@ void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 
-const size_t capacity = JSON_OBJECT_SIZE(7) + 320;
-DynamicJsonDocument jsonDoc(capacity);
-
 // ประกาศเพื่อเก็บข้อมูล Min Max ของค่าเซ็นเซอร์ Temp และ Soil
 char msg_Minsoil[100],
      msg_Maxsoil[100];
@@ -40,28 +39,6 @@ unsigned long previousTime_brightness         = 0;
 // ประกาศตัวแปรกำหนดการนับเวลาเริ่มต้น
 unsigned long previousTime_Update_data        = 0;
 const unsigned long eventInterval_publishData = 2 * 60 * 1000;     // เช่น 2*60*1000 ส่งทุก 2 นาที
-
-float difference_soil                         = 20.00,    // ค่าความชื้นดินแตกต่างกัน +-20 % เมื่อไรส่งค่าขึ้น Web app ทันที
-      difference_temp                         = 4.00;     // ค่าอุณหภูมิแตกต่างกัน +- 4 C เมื่อไรส่งค่าขึ้น Web app ทันที
-float soil_old  = 0.00,
-      temp_old  = 0.00;
-
-// ประกาศตัวแปรสำหรับเก็บค่าเซ็นเซอร์
-float   temp              = 0;
-int     temp_error        = 0;
-int     temp_error_count  = 0;
-
-float   humidity          = 0;
-int     hum_error         = 0;
-int     hum_error_count   = 0;
-
-float   lux_44009         = 0;
-int     lux_error         = 0;
-int     lux_error_count   = 0;
-
-float   soil              = 0;
-int     soil_error        = 0;
-int     soil_error_count  = 0;
 
 // Array สำหรับทำ Movie Arg. ของค่าเซ็นเซอร์ทุก ๆ ค่า
 float ma_temp[5];
@@ -91,10 +68,12 @@ int t[20];
 #define Close_relay(j)   digitalWrite(relay_pin[j], LOW)
 
 /* new PCB Red */
-int relay_pin[4] = {25, 14, 12, 13};
+int relay_pin[4] = { O1, O2, O3, O4 };
 
 // ตัวแปรเก็บค่าการตั้งเวลาทำงานอัตโนมัติ
-unsigned int time_open[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+unsigned int time_open[4][7][3] = {
+  {
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
     {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
   },
   { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
@@ -107,7 +86,9 @@ unsigned int time_open[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {200
     {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
   }
 };
-unsigned int time_close[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+unsigned int time_close[4][7][3] = {
+  {
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
     {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
   },
   { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
@@ -182,11 +163,11 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
         time_close[relay][k][timer] = 3000;
       }
       int address = ((((relay * 7 * 3) + (k * 3) + timer) * 2) * 2) + 2100;
-      EEPROM.write(address, time_open[relay][k][timer] / 256);
+      /*EEPROM.write(address, time_open[relay][k][timer] / 256);
       EEPROM.write(address + 1, time_open[relay][k][timer] % 256);
       EEPROM.write(address + 2, time_close[relay][k][timer] / 256);
       EEPROM.write(address + 3, time_close[relay][k][timer] % 256);
-      EEPROM.commit();
+      EEPROM.commit();*/
       DEBUG_PRINT("time_open  : "); DEBUG_PRINTLN(time_open[relay][k][timer]);
       DEBUG_PRINT("time_close : "); DEBUG_PRINTLN(time_close[relay][k][timer]);
     }
@@ -196,11 +177,11 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
       time_open[relay][k][timer] = 3000;
       time_close[relay][k][timer] = 3000;
       int address = ((((relay * 7 * 3) + (k * 3) + timer) * 2) * 2) + 2100;
-      EEPROM.write(address, time_open[relay][k][timer] / 256);
+      /*EEPROM.write(address, time_open[relay][k][timer] / 256);
       EEPROM.write(address + 1, time_open[relay][k][timer] % 256);
       EEPROM.write(address + 2, time_close[relay][k][timer] / 256);
       EEPROM.write(address + 3, time_close[relay][k][timer] % 256);
-      EEPROM.commit();
+      EEPROM.commit();*/
       DEBUG_PRINT("time_open  : "); DEBUG_PRINTLN(time_open[relay][k][timer]);
       DEBUG_PRINT("time_close : "); DEBUG_PRINTLN(time_close[relay][k][timer]);
     }
@@ -294,16 +275,16 @@ void SoilMaxMin_setting(String topic, String message, unsigned int length) {
   if (soil_topic.substring(9, 12) == "max") {
     relayMaxsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
     Max_Soil[Relay_SoilMaxMin] = soil_message.toInt();
-    EEPROM.write(Relay_SoilMaxMin + 2000,  Max_Soil[Relay_SoilMaxMin]);
-    EEPROM.commit();
+    //EEPROM.write(Relay_SoilMaxMin + 2000,  Max_Soil[Relay_SoilMaxMin]);
+    //EEPROM.commit();
     check_sendData_SoilMinMax = 1;
     DEBUG_PRINT("Max_Soil : "); DEBUG_PRINTLN(Max_Soil[Relay_SoilMaxMin]);
   }
   else if (soil_topic.substring(9, 12) == "min") {
     relayMinsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
     Min_Soil[Relay_SoilMaxMin] = soil_message.toInt();
-    EEPROM.write(Relay_SoilMaxMin + 2004,  Min_Soil[Relay_SoilMaxMin]);
-    EEPROM.commit();
+    //EEPROM.write(Relay_SoilMaxMin + 2004,  Min_Soil[Relay_SoilMaxMin]);
+    //EEPROM.commit();
     check_sendData_SoilMinMax = 1;
     DEBUG_PRINT("Min_Soil : "); DEBUG_PRINTLN(Min_Soil[Relay_SoilMaxMin]);
   }
@@ -316,15 +297,15 @@ void TempMaxMin_setting(String topic, String message, unsigned int length) {
   int Relay_TempMaxMin = topic.substring(topic.length() - 1).toInt();
   if (temp_topic.substring(9, 12) == "max") {
     Max_Temp[Relay_TempMaxMin] = temp_message.toInt();
-    EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
-    EEPROM.commit();
+    //EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
+    //EEPROM.commit();
     check_sendData_tempMinMax = 1;
     DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(Max_Temp[Relay_TempMaxMin]);
   }
   else if (temp_topic.substring(9, 12) == "min") {
     Min_Temp[Relay_TempMaxMin] = temp_message.toInt();
-    EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
-    EEPROM.commit();
+    //EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
+    //EEPROM.commit();
     check_sendData_tempMinMax = 1;
     DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(Min_Temp[Relay_TempMaxMin]);
   }
@@ -335,7 +316,7 @@ void ControlRelay_BysoilMinMax() {
   Get_soil();
   for (int k = 0; k < 4; k++) {
     if (Min_Soil[k] != 0 && Max_Soil[k] != 0) {
-      if (soil < Min_Soil[k]) {
+      if (Sensor_get_soil() < Min_Soil[k]) {
         //DEBUG_PRINT("statusSoilMin"); DEBUG_PRINT(k); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[k]);
         if (statusSoil[k] == 0) {
           Open_relay(k);
@@ -346,7 +327,7 @@ void ControlRelay_BysoilMinMax() {
           DEBUG_PRINTLN("soil On");
         }
       }
-      else if (soil > Max_Soil[k]) {
+      else if (Sensor_get_soil() > Max_Soil[k]) {
         //DEBUG_PRINT("statusSoilMax"); DEBUG_PRINT(k); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[k]);
         if (statusSoil[k] == 1) {
           Close_relay(k);
@@ -366,7 +347,7 @@ void ControlRelay_BytempMinMax() {
   Get_sht();
   for (int g = 0; g < 4; g++) {
     if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
-      if (temp < Min_Temp[g]) {
+      if (Sensor_get_temp() < Min_Temp[g]) {
         //DEBUG_PRINT("statusTempMin"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
         if (statusTemp[g] == 1) {
           Close_relay(g);
@@ -377,7 +358,7 @@ void ControlRelay_BytempMinMax() {
           DEBUG_PRINTLN("temp Off");
         }
       }
-      else if (temp > Max_Temp[g]) {
+      else if (Sensor_get_temp() > Max_Temp[g]) {
         //DEBUG_PRINT("statusTempMax"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
         if (statusTemp[g] == 0) {
           Open_relay(g);
@@ -395,10 +376,10 @@ void ControlRelay_BytempMinMax() {
 /* ----------------------- Set All Config --------------------------- */
 void setAll_config() {
   for (int b = 0; b < 4; b++) {
-    Max_Soil[b] = EEPROM.read(b + 2000);
+    /*Max_Soil[b] = EEPROM.read(b + 2000);
     Min_Soil[b] = EEPROM.read(b + 2004);
     Max_Temp[b] = EEPROM.read(b + 2008);
-    Min_Temp[b] = EEPROM.read(b + 2012);
+    Min_Temp[b] = EEPROM.read(b + 2012);*/
     if (Max_Soil[b] >= 255) {
       Max_Soil[b] = 0;
     }
@@ -421,8 +402,8 @@ void setAll_config() {
     for (int eeprom_timer = 0; eeprom_timer < 3; eeprom_timer++) {
       for (int dayinweek = 0; dayinweek < 7; dayinweek++) {
         int eeprom_address = ((((eeprom_relay * 7 * 3) + (dayinweek * 3) + eeprom_timer) * 2) * 2) + 2100;
-        time_open[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address) * 256) + (EEPROM.read(eeprom_address + 1));
-        time_close[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address + 2) * 256) + (EEPROM.read(eeprom_address + 3));
+        // time_open[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address) * 256) + (EEPROM.read(eeprom_address + 1));
+        // time_close[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address + 2) * 256) + (EEPROM.read(eeprom_address + 3));
 
         if (time_open[eeprom_relay][dayinweek][eeprom_timer] >= 2000) {
           time_open[eeprom_relay][dayinweek][eeprom_timer] = 3000;
@@ -441,18 +422,24 @@ void setAll_config() {
 
 void setup() {
   Serial.begin(115200);
-  EEPROM.begin(4096);
-  Wire.begin();
-  Wire.setClock(10000);
 
+  // Setup relay pin to OUTPUT
   pinMode(relay_pin[0], OUTPUT);
   pinMode(relay_pin[1], OUTPUT);
   pinMode(relay_pin[2], OUTPUT);
   pinMode(relay_pin[3], OUTPUT);
-  digitalWrite(relay_pin[0], LOW);
-  digitalWrite(relay_pin[1], LOW);
-  digitalWrite(relay_pin[2], LOW);
-  digitalWrite(relay_pin[3], LOW);
+
+  // Init I2C
+  Wire.begin();
+  Wire.setClock(10000);
+
+  // Init SPIFFS
+  if(!SPIFFS.begin(true)){
+    Serial.println("SPIFFS Mount Failed");
+  }
+
+  // Init configs manager
+  MemConfigs_begin();
   
   // Handle all command from HandySense via Serial
   HandySenseWebSerial_begin();
@@ -460,14 +447,14 @@ void setup() {
   // Init Sensor
   SensorManager_begin();
 
+  // Init NETPIE
+  NETPIE_begin();
+  
   // Init RTC & NTP
   Time_begin();
 
   // Init TFT LCD & LVGL
   Display_begin();
-  
-  
-  setAll_config();
 }
 
 void loop() {

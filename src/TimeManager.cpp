@@ -18,7 +18,7 @@ static struct tm timeinfo;
 
 struct tm getSyncTime() {
   bool getTimeFromInternet = false;
-  if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.isConnected()) {
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
     if (getLocalTime(&timeinfo)) {
       rtc.write(&timeinfo); // Sync time to RTC
@@ -27,7 +27,7 @@ struct tm getSyncTime() {
   }
   if (!getTimeFromInternet) {
     rtc.read(&timeinfo);
-    DEBUG_PRINT("USE RTC 1");
+    // DEBUG_PRINTLN("USE RTC 1");
   }
 
   return timeinfo;

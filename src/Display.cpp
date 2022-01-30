@@ -4,7 +4,10 @@
 #include <lvgl.h>
 #include <lv_qrcode.h>
 #include <WiFi.h>
+
 #include "SensorManager.h"
+#include "TimeManager.h"
+
 #include "debug.h"
 
 #define LCD_BL_PIN 32
@@ -297,7 +300,7 @@ void Display_begin() {
   pinMode(LCD_BL_PIN, OUTPUT);
   digitalWrite(LCD_BL_PIN, LOW);
 
-  do_touch_calibration();
+  // do_touch_calibration();
 
   /*Initialize the (dummy) input device driver*/
   lv_indev_drv_t indev_drv;
@@ -341,6 +344,19 @@ void Display_runCycle() {
     }
 
     ui_update_timer = millis();
+  }
+
+  static uint64_t time_update_timer = 0;
+  if (((millis() - time_update_timer) >= 1000) || (time_update_timer == 0)) {
+    struct tm timeinfo = getSyncTime();
+
+    static char time_str_buff[20];
+    sprintf(time_str_buff, "%02d:%02d:%02d", 
+                            timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    lv_label_set_text(txtTime, time_str_buff);
+    lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);
+
+    time_update_timer = millis();
   }
 
   static uint64_t lvgl_timer = 0;
