@@ -9,6 +9,15 @@ byte STX = 02;
 byte ETX = 03;
 uint8_t START_PATTERN[3] = { 0, 111, 222 };
 
+void StartSendToWeb() {
+  Serial.write(START_PATTERN, 3);
+  Serial.write(STX);
+}
+
+void StopSendToWeb() {
+  Serial.write(ETX);
+}
+
 void HandySenseWebSerial_begin() {
   Serial.setTimeout(1000); // Timeout of read from Serial
 
@@ -16,8 +25,7 @@ void HandySenseWebSerial_begin() {
   JsonObject wifiConfigs = getWiFiConfigs()->as<JsonObject>();
 
   // Send start to Web
-  Serial.write(START_PATTERN, 3);
-  Serial.write(STX);
+  StartSendToWeb();
 
   // Send real content
   Serial.printf(
@@ -32,7 +40,7 @@ void HandySenseWebSerial_begin() {
   );
 
   // Send END to Web
-  Serial.write(ETX);
+  StopSendToWeb();
 }
 
 void HandySenseWebSerial_runCycle() {
@@ -61,6 +69,14 @@ void HandySenseWebSerial_runCycle() {
           wifiConfigs->getMember("mqtt_client").set(jsonDoc["client"].as<const char*>());
           wifiConfigs->getMember("mqtt_username").set(jsonDoc["user"].as<const char*>());
           wifiConfigs->getMember("mqtt_password").set(jsonDoc["pass"].as<const char*>());
+
+          StartSendToWeb();
+          if (SaveWiFiConfigs()) {
+            serializeJson(jsonDoc, Serial);
+          } else {
+            Serial.printf("{\"e\": \"Save configs FAIL !\"}");
+          }
+          StopSendToWeb();
         } else {
           DEBUG_PRINTLN("Unknow command");
         }

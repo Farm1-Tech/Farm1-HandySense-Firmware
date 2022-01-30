@@ -192,11 +192,7 @@ void NETPIEManagerTask(void*) {
       }
 
       // Start WiFi connect
-      if (WiFi.begin(wifiSSID, strlen(wifiPassword) > 5 ? wifiPassword : NULL) == WL_CONNECT_FAILED) {
-        DEBUG_PRINTLN("WiFi begin fail");
-        delay(500);
-        continue;
-      }
+      WiFi.begin(wifiSSID, strlen(wifiPassword) > 5 ? wifiPassword : NULL);
       
       // Wait WiFi connect or disconnect
       while(!WiFi.isConnected()) {
@@ -237,11 +233,13 @@ void NETPIEManagerTask(void*) {
       }
     } else {
       static uint64_t update_data_timer = 0;
-      if (((millis() - update_data_timer) >= 1000) || (update_data_timer == 0)) {
+      if (((millis() - update_data_timer) >= (60 * 1000)) || (update_data_timer == 0)) {
         UpdateData_To_Server();
+        /*
         sendStatus_RelaytoWeb();
         send_soilMinMax();
         send_tempMinMax();  
+        */
 
         update_data_timer = millis();
       }

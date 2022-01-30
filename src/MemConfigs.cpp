@@ -7,8 +7,8 @@
 
 static DynamicJsonDocument jsonDocWiFiConfigs(2 * 1024);
 
-#define OPEN_FILE(file_name) ({ \
-                              file = SPIFFS.open(file_name, FILE_WRITE); \
+#define OPEN_FILE(file_name, mode) ({ \
+                              file = SPIFFS.open(file_name, mode); \
                               if(!file || file.isDirectory()){ \
                                 Serial.printf("%s failed to open file for writing\n", file_name); \
                                 return false; \
@@ -17,8 +17,10 @@ static DynamicJsonDocument jsonDocWiFiConfigs(2 * 1024);
 
 bool SaveWiFiConfigs() {
   File file;
-  OPEN_FILE(WIFI_CONFIGS_FILE);
+  OPEN_FILE(WIFI_CONFIGS_FILE, FILE_WRITE);
   serializeJson(jsonDocWiFiConfigs, file);
+  // Serial.print("Write to file: ");
+  // serializeJson(jsonDocWiFiConfigs, Serial);
   file.close();
 
   return true;
@@ -37,7 +39,7 @@ DynamicJsonDocument *getWiFiConfigs() {
 bool MemConfigs_begin() {
   // Call WiFi configs from SPIFFS
   File file;
-  OPEN_FILE(WIFI_CONFIGS_FILE);
+  OPEN_FILE(WIFI_CONFIGS_FILE, FILE_READ);
   deserializeJson(jsonDocWiFiConfigs, file);
   file.close();
 
@@ -48,4 +50,6 @@ bool MemConfigs_begin() {
   ASSINGED_IF_NULL("mqtt_client");
   ASSINGED_IF_NULL("mqtt_username");
   ASSINGED_IF_NULL("mqtt_password");
+
+  return true;
 }
