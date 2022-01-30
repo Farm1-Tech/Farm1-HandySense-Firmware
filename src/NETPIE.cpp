@@ -12,12 +12,8 @@
 
 #include "debug.h"
 
-extern unsigned int status_manual[];
+bool send_relay_status_flag = false;
 
-extern int check_sendData_status;
-extern int check_sendData_toWeb;
-extern int check_sendData_SoilMinMax;
-extern int check_sendData_tempMinMax;
 
 extern void timmer_setting(String topic, byte * payload, unsigned int length) ;
 extern void TempMaxMin_setting(String topic, String message, unsigned int length) ;
@@ -53,10 +49,6 @@ void callback(String topic, byte* payload, unsigned int length) {
   }
   /* ------- topic manual_control relay ------- */
   else if (topic.startsWith("@private/led")) {
-    status_manual[0] = 0;
-    status_manual[1] = 0;
-    status_manual[2] = 0;
-    status_manual[3] = 0;
     ControlRelay_Bymanual(topic, message, length);
   }
   /* ------- topic Soil min max ------- */
@@ -96,9 +88,13 @@ void UpdateData_To_Server() {
   }
 }
 
+void NETPIE_SendRealyStatus() {
+  send_relay_status_flag = true;
+}
+
 /* --------- sendStatus_RelaytoWeb --------- */
 void sendStatus_RelaytoWeb() {
-  if (check_sendData_status == 1) {
+  if (send_relay_status_flag) {
     String _payload = "{\"data\": {\"led0\":\"" + String(digitalRead(O1)) +
                "\",\"led1\":\"" + String(digitalRead(O2)) +
                "\",\"led2\":\"" + String(digitalRead(O3)) +
@@ -106,15 +102,21 @@ void sendStatus_RelaytoWeb() {
     DEBUG_PRINT("_payload : ");
     DEBUG_PRINTLN(_payload);
     if (client.publish("@shadow/data/update", _payload.c_str())) {
-      check_sendData_status = 0;
+      send_relay_status_flag = false;
       DEBUG_PRINTLN(" Send Complete Relay ");
     }
   }
 }
 
 /* --------- Respone soilMinMax toWeb --------- */
+bool send_relay_control_by_soil_flag = false;
+
+void NETPIE_SendRealyControlBySoilStatus() {
+  send_relay_control_by_soil_flag = true;
+}
+
 void send_soilMinMax() {
-  if (check_sendData_SoilMinMax == 1) {
+  if (send_relay_control_by_soil_flag) {
     String soil_payload =  "{\"data\": {\"min_soil0\":" + String(Min_Soil[0]) + ",\"max_soil0\":" + String(Max_Soil[0]) +
                            ",\"min_soil1\":" + String(Min_Soil[1]) + ",\"max_soil1\":" + String(Max_Soil[1]) +
                            ",\"min_soil2\":" + String(Min_Soil[2]) + ",\"max_soil2\":" + String(Max_Soil[2]) +
@@ -122,15 +124,21 @@ void send_soilMinMax() {
     DEBUG_PRINT("soil_payload : ");
     DEBUG_PRINTLN(soil_payload);
     if (client.publish("@shadow/data/update", soil_payload.c_str())) {
-      check_sendData_SoilMinMax = 0;
+      send_relay_control_by_soil_flag = false;
       DEBUG_PRINTLN(" Send Complete min max ");
     }
   }
 }
 
 /* --------- Respone tempMinMax toWeb --------- */
+bool send_relay_control_by_temp_flag = false;
+
+void NETPIE_SendRealyControlByTempStatus() {
+  send_relay_control_by_temp_flag = true;
+}
+
 void send_tempMinMax() {
-  if (check_sendData_tempMinMax == 1) {
+  if (send_relay_control_by_temp_flag) {
     String temp_payload =  "{\"data\": {\"min_temp0\":" + String(Min_Temp[0]) + ",\"max_temp0\":" + String(Max_Temp[0]) +
                            ",\"min_temp1\":" + String(Min_Temp[1]) + ",\"max_temp1\":" + String(Max_Temp[1]) +
                            ",\"min_temp2\":" + String(Min_Temp[2]) + ",\"max_temp2\":" + String(Max_Temp[2]) +
@@ -138,7 +146,7 @@ void send_tempMinMax() {
     DEBUG_PRINT("temp_payload : ");
     DEBUG_PRINTLN(temp_payload);
     if (client.publish("@shadow/data/update", temp_payload.c_str())) {
-      check_sendData_tempMinMax = 0;
+      send_relay_control_by_temp_flag = false;
     }
   }
 }
@@ -235,11 +243,6 @@ void NETPIEManagerTask(void*) {
       static uint64_t update_data_timer = 0;
       if (((millis() - update_data_timer) >= (60 * 1000)) || (update_data_timer == 0)) {
         UpdateData_To_Server();
-        /*
-        sendStatus_RelaytoWeb();
-        send_soilMinMax();
-        send_tempMinMax();  
-        */
 
         update_data_timer = millis();
       }

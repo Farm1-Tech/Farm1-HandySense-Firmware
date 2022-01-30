@@ -11,6 +11,7 @@
 #include "NETPIE.h"
 #include "TimeManager.h"
 #include "SensorManager.h"
+#include "RelayControl.h"
 #include "Display.h"
 
 #include "debug.h"
@@ -22,6 +23,9 @@ void sent_dataTimer(String topic, String message) ;
 void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
+
+extern unsigned int time_open[4][7][3] ;
+extern unsigned int time_close[4][7][3] ;
 
 // ประกาศเพื่อเก็บข้อมูล Min Max ของค่าเซ็นเซอร์ Temp และ Soil
 char msg_Minsoil[100],
@@ -59,66 +63,11 @@ int t[20];
 #define value_hour_Close          t[11]
 #define value_min_Close           t[12]
 
-#define OPEN        1
-#define CLOSE       0
-
-#define Open_relay(j)    digitalWrite(relay_pin[j], HIGH)
-#define Close_relay(j)   digitalWrite(relay_pin[j], LOW)
-
-/* new PCB Red */
-int relay_pin[4] = { O1, O2, O3, O4 };
-
-// ตัวแปรเก็บค่าการตั้งเวลาทำงานอัตโนมัติ
-unsigned int time_open[4][7][3] = {
-  {
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  }
-};
-unsigned int time_close[4][7][3] = {
-  {
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  },
-  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
-    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
-  }
-};
-
-float Max_Soil[4], Min_Soil[4];
-float Max_Temp[4], Min_Temp[4];
-
-unsigned int statusTimer_open[4] = {1, 1, 1, 1};
-unsigned int statusTimer_close[4] = {1, 1, 1, 1};
-unsigned int status_manual[4];
-
-unsigned int statusSoil[4];
-unsigned int statusTemp[4];
-
 // สถานะการทำงานของ Relay ด้ววยค่า Min Max
 int relayMaxsoil_status[4];
 int relayMinsoil_status[4];
 int relayMaxtemp_status[4];
 int relayMintemp_status[4];
-
-int RelayStatus[4];
-TaskHandle_t WifiStatus, WaitSerial;
-unsigned int oldTimer;
 
 int check_sendData_status = 0;
 int check_sendData_toWeb  = 0;
@@ -189,82 +138,6 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
   }
 }
 
-/* ------------ Control Relay By Timmer ------------- */
-void ControlRelay_Bytimmer() {
-  int curentTimer;
-  int dayofweek;
-  
-  struct tm timeinfo = getSyncTime();
-  
-  curentTimer = (timeinfo.tm_hour * 60) + timeinfo.tm_min;
-  dayofweek = timeinfo.tm_wday - 1;
-  
-  static char time_str_buff[20];
-  sprintf(time_str_buff, "%02d:%02d:%02d", 
-                          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  /*lv_label_set_text(txtTime, time_str_buff);
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);*/
-
-  //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
-  /* check curentTimer => 0-1440 */
-  if ((curentTimer >= 0) && (curentTimer <= 1440)) {
-    if (dayofweek == -1) {
-      dayofweek = 6;
-    }
-    //DEBUG_PRINT("dayofweek   : "); DEBUG_PRINTLN(dayofweek);
-    if (curentTimer != oldTimer) {
-      for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 3; j++) {
-          if (time_open[i][dayofweek][j] == curentTimer) {
-            RelayStatus[i] = 1;
-            check_sendData_status = 1;
-            Open_relay(i);
-            DEBUG_PRINTLN("timer On");
-            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
-          }
-          else if (time_close[i][dayofweek][j] == curentTimer) {
-            RelayStatus[i] = 0;
-            check_sendData_status = 1;
-            Close_relay(i);
-            DEBUG_PRINTLN("timer Off");
-            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
-          }
-          else if (time_open[i][dayofweek][j] == 3000 && time_close[i][dayofweek][j] == 3000) {
-            //        Close_relay(i);
-            //        DEBUG_PRINTLN(" Not check day, Not Working relay");
-          }
-        }
-      }
-      oldTimer = curentTimer;
-    }
-  }
-}
-
-/* ----------------------- Manual Control --------------------------- */
-void ControlRelay_Bymanual(String topic, String message, unsigned int length) {
-  String manual_message = message;
-  int manual_relay = topic.substring(topic.length() - 1).toInt();
-  DEBUG_PRINTLN();
-  DEBUG_PRINT("manual_message : "); DEBUG_PRINTLN(manual_message);
-  DEBUG_PRINT("manual_relay   : "); DEBUG_PRINTLN(manual_relay);
-  if (status_manual[manual_relay] == 0) {
-    status_manual[manual_relay] = 1;
-    if (manual_message == "on") {
-      Open_relay(manual_relay);
-      RelayStatus[manual_relay] = 1;
-      DEBUG_PRINTLN("ON man");
-    }
-    else if (manual_message == "off") {
-      Close_relay(manual_relay);
-      RelayStatus[manual_relay] = 0;
-      DEBUG_PRINTLN("OFF man");
-    }
-    check_sendData_status = 1;
-  }
-}
-
 /* ----------------------- SoilMaxMin_setting --------------------------- */
 void SoilMaxMin_setting(String topic, String message, unsigned int length) {
   String soil_message = message;
@@ -272,19 +145,19 @@ void SoilMaxMin_setting(String topic, String message, unsigned int length) {
   int Relay_SoilMaxMin = topic.substring(topic.length() - 1).toInt();
   if (soil_topic.substring(9, 12) == "max") {
     relayMaxsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
-    Max_Soil[Relay_SoilMaxMin] = soil_message.toInt();
+    // Max_Soil[Relay_SoilMaxMin] = soil_message.toInt();
     //EEPROM.write(Relay_SoilMaxMin + 2000,  Max_Soil[Relay_SoilMaxMin]);
     //EEPROM.commit();
     check_sendData_SoilMinMax = 1;
-    DEBUG_PRINT("Max_Soil : "); DEBUG_PRINTLN(Max_Soil[Relay_SoilMaxMin]);
+    // DEBUG_PRINT("Max_Soil : "); DEBUG_PRINTLN(Max_Soil[Relay_SoilMaxMin]);
   }
   else if (soil_topic.substring(9, 12) == "min") {
     relayMinsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
-    Min_Soil[Relay_SoilMaxMin] = soil_message.toInt();
+    // Min_Soil[Relay_SoilMaxMin] = soil_message.toInt();
     //EEPROM.write(Relay_SoilMaxMin + 2004,  Min_Soil[Relay_SoilMaxMin]);
     //EEPROM.commit();
     check_sendData_SoilMinMax = 1;
-    DEBUG_PRINT("Min_Soil : "); DEBUG_PRINTLN(Min_Soil[Relay_SoilMaxMin]);
+    // DEBUG_PRINT("Min_Soil : "); DEBUG_PRINTLN(Min_Soil[Relay_SoilMaxMin]);
   }
 }
 
@@ -294,78 +167,18 @@ void TempMaxMin_setting(String topic, String message, unsigned int length) {
   String temp_topic = topic;
   int Relay_TempMaxMin = topic.substring(topic.length() - 1).toInt();
   if (temp_topic.substring(9, 12) == "max") {
-    Max_Temp[Relay_TempMaxMin] = temp_message.toInt();
+    // Max_Temp[Relay_TempMaxMin] = temp_message.toInt();
     //EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
     //EEPROM.commit();
     check_sendData_tempMinMax = 1;
-    DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(Max_Temp[Relay_TempMaxMin]);
+    // DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(Max_Temp[Relay_TempMaxMin]);
   }
   else if (temp_topic.substring(9, 12) == "min") {
-    Min_Temp[Relay_TempMaxMin] = temp_message.toInt();
+    // Min_Temp[Relay_TempMaxMin] = temp_message.toInt();
     //EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
     //EEPROM.commit();
     check_sendData_tempMinMax = 1;
-    DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(Min_Temp[Relay_TempMaxMin]);
-  }
-}
-
-/* ----------------------- soilMinMax_ControlRelay --------------------------- */
-void ControlRelay_BysoilMinMax() {
-  for (int k = 0; k < 4; k++) {
-    if (Min_Soil[k] != 0 && Max_Soil[k] != 0) {
-      if (Sensor_get_soil() < Min_Soil[k]) {
-        //DEBUG_PRINT("statusSoilMin"); DEBUG_PRINT(k); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[k]);
-        if (statusSoil[k] == 0) {
-          Open_relay(k);
-          statusSoil[k] = 1;
-          RelayStatus[k] = 1;
-          check_sendData_status = 1;
-          //check_sendData_toWeb = 1;
-          DEBUG_PRINTLN("soil On");
-        }
-      }
-      else if (Sensor_get_soil() > Max_Soil[k]) {
-        //DEBUG_PRINT("statusSoilMax"); DEBUG_PRINT(k); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[k]);
-        if (statusSoil[k] == 1) {
-          Close_relay(k);
-          statusSoil[k] = 0;
-          RelayStatus[k] = 0;
-          check_sendData_status = 1;
-          //check_sendData_toWeb = 1;
-          DEBUG_PRINTLN("soil Off");
-        }
-      }
-    }
-  }
-}
-
-/* ----------------------- tempMinMax_ControlRelay --------------------------- */
-void ControlRelay_BytempMinMax() {
-  for (int g = 0; g < 4; g++) {
-    if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
-      if (Sensor_get_temp() < Min_Temp[g]) {
-        //DEBUG_PRINT("statusTempMin"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
-        if (statusTemp[g] == 1) {
-          Close_relay(g);
-          statusTemp[g] = 0;
-          RelayStatus[g] = 0;
-          check_sendData_status = 1;
-          //check_sendData_toWeb = 1;
-          DEBUG_PRINTLN("temp Off");
-        }
-      }
-      else if (Sensor_get_temp() > Max_Temp[g]) {
-        //DEBUG_PRINT("statusTempMax"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
-        if (statusTemp[g] == 0) {
-          Open_relay(g);
-          statusTemp[g] = 1;
-          RelayStatus[g] = 1;
-          check_sendData_status = 1;
-          //check_sendData_toWeb = 1;
-          DEBUG_PRINTLN("temp On");
-        }
-      }
-    }
+    // DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(Min_Temp[Relay_TempMaxMin]);
   }
 }
 
@@ -376,6 +189,7 @@ void setAll_config() {
     Min_Soil[b] = EEPROM.read(b + 2004);
     Max_Temp[b] = EEPROM.read(b + 2008);
     Min_Temp[b] = EEPROM.read(b + 2012);*/
+    /*
     if (Max_Soil[b] >= 255) {
       Max_Soil[b] = 0;
     }
@@ -392,6 +206,7 @@ void setAll_config() {
     DEBUG_PRINT("Min_Soil   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Min_Soil[b]);
     DEBUG_PRINT("Max_Temp   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Max_Temp[b]);
     DEBUG_PRINT("Min_Temp   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Min_Temp[b]);
+    */
   }
   int count_in = 0;
   for (int eeprom_relay = 0; eeprom_relay < 4; eeprom_relay++) {
@@ -419,12 +234,6 @@ void setAll_config() {
 void setup() {
   Serial.begin(115200);
 
-  // Setup relay pin to OUTPUT
-  pinMode(relay_pin[0], OUTPUT);
-  pinMode(relay_pin[1], OUTPUT);
-  pinMode(relay_pin[2], OUTPUT);
-  pinMode(relay_pin[3], OUTPUT);
-
   // Init I2C
   Wire.begin();
   Wire.setClock(10000);
@@ -449,6 +258,9 @@ void setup() {
   // Init RTC & NTP
   Time_begin();
 
+  // Init Relay
+  RelayControl_begin();
+
   // Init TFT LCD & LVGL
   Display_begin();
 }
@@ -458,5 +270,6 @@ void loop() {
   NETPIE_runCycle();
   HandySenseWebSerial_runCycle();
   Display_runCycle();
+  
   delay(1);
 }
