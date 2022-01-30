@@ -162,25 +162,7 @@ void SoilMaxMin_setting(String topic, String message, unsigned int length) {
 }
 
 /* ----------------------- TempMaxMin_setting --------------------------- */
-void TempMaxMin_setting(String topic, String message, unsigned int length) {
-  String temp_message = message;
-  String temp_topic = topic;
-  int Relay_TempMaxMin = topic.substring(topic.length() - 1).toInt();
-  if (temp_topic.substring(9, 12) == "max") {
-    // Max_Temp[Relay_TempMaxMin] = temp_message.toInt();
-    //EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
-    //EEPROM.commit();
-    check_sendData_tempMinMax = 1;
-    // DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(Max_Temp[Relay_TempMaxMin]);
-  }
-  else if (temp_topic.substring(9, 12) == "min") {
-    // Min_Temp[Relay_TempMaxMin] = temp_message.toInt();
-    //EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
-    //EEPROM.commit();
-    check_sendData_tempMinMax = 1;
-    // DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(Min_Temp[Relay_TempMaxMin]);
-  }
-}
+
 
 /* ----------------------- Set All Config --------------------------- */
 void setAll_config() {
@@ -269,6 +251,7 @@ void loop() {
   SensorManager_runCycle();
   NETPIE_runCycle();
   HandySenseWebSerial_runCycle();
+  RelayControl_runCycle();
   Display_runCycle();
   
   delay(1);

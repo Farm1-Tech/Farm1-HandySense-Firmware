@@ -4,6 +4,7 @@
 #include "NETPIE.h"
 #include "SensorManager.h"
 #include "TimeManager.h"
+#include "MemConfigs.h"
 
 #include "debug.h"
 
@@ -66,6 +67,7 @@ void ControlRelay_Bymanual(String topic, String message, unsigned int length) {
 /* ----------------------- soilMinMax_ControlRelay --------------------------- */
 void ControlRelay_BysoilMinMax() {
   bool send_status_update = false;
+  /*
   for (int k = 0; k < 4; k++) {
     if (Min_Soil[k] != 0 && Max_Soil[k] != 0) {
       if (Sensor_get_soil() < Min_Soil[k]) {
@@ -87,7 +89,8 @@ void ControlRelay_BysoilMinMax() {
         }
       }
     }
-  }
+  }*/
+
   if (send_status_update) {
     NETPIE_SendRealyStatus();
   }
@@ -96,26 +99,22 @@ void ControlRelay_BysoilMinMax() {
 /* ----------------------- tempMinMax_ControlRelay --------------------------- */
 void ControlRelay_BytempMinMax() {
   bool send_status_update = false;
-  for (int g = 0; g < 4; g++) {
-    if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
-      if (Sensor_get_temp() < Min_Temp[g]) {
-        //DEBUG_PRINT("statusTempMin"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
-        if (statusTemp[g] == 1) {
-          Relay_Set(g, false);
-          statusTemp[g] = 0;
-          send_status_update = true;
-          DEBUG_PRINTLN("temp Off");
-        }
-      }
-      else if (Sensor_get_temp() > Max_Temp[g]) {
-        //DEBUG_PRINT("statusTempMax"); DEBUG_PRINT(g); DEBUG_PRINT(" : "); DEBUG_PRINTLN(statusTemp[g]);
-        if (statusTemp[g] == 0) {
-          Relay_Set(g, true);
-          statusTemp[g] = 1;
-          send_status_update = true;
-          DEBUG_PRINTLN("temp On");
-        }
-      }
+  DynamicJsonDocument *workConfigs = getWorkConfigs();
+  JsonVariant temp_max = workConfigs->getMember("temp_max");
+  JsonVariant temp_min = workConfigs->getMember("temp_min");
+  float temp_now = Sensor_get_temp();
+  for (int relay=0;relay<4;relay++) {
+    if (temp_min[relay] == 0 || temp_max[relay] == 0) { // Skip if any is 0
+      continue;
+    }
+
+    if (temp_now < temp_min[relay]) {
+      Relay_Set(relay, false);
+      send_status_update = true;
+    }
+    if (temp_now > temp_max[relay]) {
+      Relay_Set(relay, true);
+      send_status_update = true;
     }
   }
   if (send_status_update) {
@@ -195,5 +194,12 @@ void RelayControl_begin() {
 }
 
 void RelayControl_runCycle() {
-  
+  static uint64_t relay_control_timer = 0;
+  if (((millis() - relay_control_timer) >= 1000) || (relay_control_timer == 0)) {
+    ControlRelay_BysoilMinMax();
+    ControlRelay_BytempMinMax();
+    ControlRelay_Bytimmer();
+
+    relay_control_timer = millis();
+  }
 }

@@ -12,19 +12,18 @@
 
 #include "debug.h"
 
-bool send_relay_status_flag = false;
-
-
 extern void timmer_setting(String topic, byte * payload, unsigned int length) ;
-extern void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 extern void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 extern void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
 
 extern float Max_Soil[], Min_Soil[];
 extern float Max_Temp[], Min_Temp[];
 
-extern DynamicJsonDocument jsonDoc;
-       
+// Response to Web by Send configs to shadow
+bool send_relay_status_flag = false;
+bool send_relay_control_by_soil_flag = false;
+bool send_relay_control_by_temp_flag = false;
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -32,16 +31,39 @@ TaskHandle_t NETPIEManagerTaskHandle;
 
 void sent_dataTimer(String topic, String message) ;
 
+void TempMaxMin_setting(String topic, String message, unsigned int length) {
+  int relay_num = topic.substring(topic.length() - 1).toInt();
+  int value = message.toInt();
+
+  DynamicJsonDocument *workConfigs = getWorkConfigs();
+  if (topic.indexOf("max_temp") >= 0) {
+    // Max_Temp[Relay_TempMaxMin]
+    //EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
+    //EEPROM.commit();
+    DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(value);
+    workConfigs->getMember("temp_max").as<JsonArray>()[relay_num].set(value);
+  } else if (topic.indexOf("min_temp") >= 0) {
+    // Min_Temp[Relay_TempMaxMin] = message.toInt();
+    //EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
+    //EEPROM.commit();
+    DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(value);
+    workConfigs->getMember("temp_min").as<JsonArray>()[relay_num].set(value);
+  }
+  SaveWorkConfigs();
+  send_relay_control_by_temp_flag = true;
+}
+
 /* --------- Callback function get data from web ---------- */
 void callback(String topic, byte* payload, unsigned int length) {
   //DEBUG_PRINT("Message arrived [");
   DEBUG_PRINT("Message arrived [");
   DEBUG_PRINT(topic);
-  DEBUG_PRINT("] ");
+  DEBUG_PRINT("]: ");
   String message;
   for (int i=0;i<length;i++) {
     message = message + (char)payload[i];
   }
+  DEBUG_PRINTLN(message);
   /* ------- topic timer ------- */
   if (topic.startsWith("@private/timer")) {
     timmer_setting(topic, payload, length);
@@ -109,12 +131,6 @@ void sendStatus_RelaytoWeb() {
 }
 
 /* --------- Respone soilMinMax toWeb --------- */
-bool send_relay_control_by_soil_flag = false;
-
-void NETPIE_SendRealyControlBySoilStatus() {
-  send_relay_control_by_soil_flag = true;
-}
-
 void send_soilMinMax() {
   if (send_relay_control_by_soil_flag) {
     String soil_payload =  "{\"data\": {\"min_soil0\":" + String(Min_Soil[0]) + ",\"max_soil0\":" + String(Max_Soil[0]) +
@@ -131,18 +147,21 @@ void send_soilMinMax() {
 }
 
 /* --------- Respone tempMinMax toWeb --------- */
-bool send_relay_control_by_temp_flag = false;
-
 void NETPIE_SendRealyControlByTempStatus() {
   send_relay_control_by_temp_flag = true;
 }
 
 void send_tempMinMax() {
   if (send_relay_control_by_temp_flag) {
-    String temp_payload =  "{\"data\": {\"min_temp0\":" + String(Min_Temp[0]) + ",\"max_temp0\":" + String(Max_Temp[0]) +
-                           ",\"min_temp1\":" + String(Min_Temp[1]) + ",\"max_temp1\":" + String(Max_Temp[1]) +
-                           ",\"min_temp2\":" + String(Min_Temp[2]) + ",\"max_temp2\":" + String(Max_Temp[2]) +
-                           ",\"min_temp3\":" + String(Min_Temp[3]) + ",\"max_temp3\":" + String(Max_Temp[3]) + "}}";
+    DynamicJsonDocument *workConfigs = getWorkConfigs();
+    JsonVariant temp_max = workConfigs->getMember("temp_max");
+    JsonVariant temp_min = workConfigs->getMember("temp_min");
+    String temp_payload =  "{\"data\": {"
+                            "\"min_temp0\":" + String(temp_min[0].as<int>()) + ",\"max_temp0\":" + String(temp_max[0].as<int>()) + ","
+                            "\"min_temp1\":" + String(temp_min[1].as<int>()) + ",\"max_temp1\":" + String(temp_max[1].as<int>()) + ","
+                            "\"min_temp2\":" + String(temp_min[2].as<int>()) + ",\"max_temp2\":" + String(temp_max[2].as<int>()) + ","
+                            "\"min_temp3\":" + String(temp_min[3].as<int>()) + ",\"max_temp3\":" + String(temp_max[3].as<int>()) + 
+                           "}}";
     DEBUG_PRINT("temp_payload : ");
     DEBUG_PRINTLN(temp_payload);
     if (client.publish("@shadow/data/update", temp_payload.c_str())) {
