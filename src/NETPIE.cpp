@@ -243,6 +243,11 @@ void NETPIEManagerTask(void*) {
 
         update_data_timer = millis();
       }
+      
+      // Update to shodow
+      sendStatus_RelaytoWeb();
+      send_soilMinMax();
+      send_tempMinMax(); 
     }
 
     client.loop();

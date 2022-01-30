@@ -17,8 +17,6 @@
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
-void Get_soil() ;
-void Get_sht() ;
 void TaskWifiStatus(void * pvParameters) ;
 void sent_dataTimer(String topic, String message) ;
 void ControlRelay_Bytimmer() ;
@@ -313,7 +311,6 @@ void TempMaxMin_setting(String topic, String message, unsigned int length) {
 
 /* ----------------------- soilMinMax_ControlRelay --------------------------- */
 void ControlRelay_BysoilMinMax() {
-  Get_soil();
   for (int k = 0; k < 4; k++) {
     if (Min_Soil[k] != 0 && Max_Soil[k] != 0) {
       if (Sensor_get_soil() < Min_Soil[k]) {
@@ -344,7 +341,6 @@ void ControlRelay_BysoilMinMax() {
 
 /* ----------------------- tempMinMax_ControlRelay --------------------------- */
 void ControlRelay_BytempMinMax() {
-  Get_sht();
   for (int g = 0; g < 4; g++) {
     if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
       if (Sensor_get_temp() < Min_Temp[g]) {
@@ -449,7 +445,7 @@ void setup() {
 
   // Init NETPIE
   NETPIE_begin();
-  
+
   // Init RTC & NTP
   Time_begin();
 
