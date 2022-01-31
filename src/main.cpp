@@ -2,8 +2,6 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <ArduinoJson.h>
-#include <FS.h>
-#include <SPIFFS.h>
 
 #include "Farm1.h"
 #include "MemConfigs.h"
@@ -219,11 +217,6 @@ void setup() {
   // Init I2C
   Wire.begin();
   Wire.setClock(10000);
-
-  // Init SPIFFS
-  if(!SPIFFS.begin(true)){
-    Serial.println("SPIFFS Mount Failed");
-  }
 
   // Init configs manager
   MemConfigs_begin();

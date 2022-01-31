@@ -54,6 +54,11 @@ DynamicJsonDocument *getWorkConfigs() {
                                 })
 
 bool MemConfigs_begin() {
+  // Init SPIFFS
+  if(!SPIFFS.begin(true)){
+    Serial.println("SPIFFS Mount Failed");
+  }
+  
   // Call WiFi configs from SPIFFS
   File file;
   OPEN_FILE(WIFI_CONFIGS_FILE, FILE_READ);
