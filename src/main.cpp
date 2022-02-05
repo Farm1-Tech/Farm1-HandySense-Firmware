@@ -2,8 +2,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <ArduinoJson.h>
-<<<<<<< HEAD
-=======
+
 #include <EEPROM.h>
 #include <StreamUtils.h>
 #include "Adafruit_SHT31.h"
@@ -19,7 +18,6 @@
 #include "Artron_DS1338.h"
 #include <TFT_eSPI.h>
 #include <lvgl.h>
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
 
 #include "Farm1.h"
 #include "MemConfigs.h"
@@ -34,21 +32,19 @@
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
-<<<<<<< HEAD
-=======
+
 void Get_soil() ;
 void Get_sht31() ;
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
+
 void TaskWifiStatus(void * pvParameters) ;
 void sent_dataTimer(String topic, String message) ;
 void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 
-<<<<<<< HEAD
 extern unsigned int time_open[4][7][3] ;
 extern unsigned int time_close[4][7][3] ;
-=======
+
 #ifdef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
 #define DEBUG_PRINTLN(x)  //Serial.println(x)
