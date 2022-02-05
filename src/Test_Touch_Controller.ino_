@@ -1,14 +1,7 @@
-#include <Arduino.h>
-#include "Display.h"
+#include "Arduino.h"
+#include <SPI.h>
 #include <TFT_eSPI.h>
 #include <lvgl.h>
-#include <lv_qrcode.h>
-#include <WiFi.h>
-
-#include "SensorManager.h"
-#include "TimeManager.h"
-
-#include "debug.h"
 
 #define LCD_BL_PIN 32
 
@@ -16,6 +9,17 @@ TFT_eSPI tft = TFT_eSPI();
 
 static lv_disp_buf_t disp_buf;
 static lv_color_t buf[LV_HOR_RES_MAX * 10];
+
+extern void load_page_touch_calibration() ;
+extern lv_obj_t* TouchCalibrationScreen;
+
+extern lv_obj_t* objTopLeftTouchPoint;
+extern lv_obj_t* objBottomLeftTouchPoint;
+extern lv_obj_t* objBottomRightTouchPoint;
+extern lv_obj_t* objRightLeftTouchPoint;
+
+extern lv_obj_t* txtTouchCalibrationStep;
+extern lv_obj_t* txtTouchCalibrationCountdown;
 
 /* Display flushing */
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
@@ -30,91 +34,12 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
   lv_disp_flush_ready(disp);
 }
 
-
 struct {
   uint16_t max_x = 0;
   uint16_t max_y = 0;
   uint16_t min_x = 0;
   uint16_t min_y = 0;
 } TouchCalibration;
-
-bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
-  uint16_t x = 0, y = 0;
-  // bool touched = tft.getTouch(&x, &y, 500);
-
-  // uint16_t x, y;
-  tft.getTouchRaw(&y, &x); // Axis wrong
-  bool touched = (x > 10) && (y > 10);
-  // Serial.printf("raw_x: %5d\traw_y: %5d\n", x, y);
-  
-  /*
-  x = map(x, TouchCalibration.min_x, TouchCalibration.max_x, 28, 320 - 28);
-  y = map(y, TouchCalibration.min_y, TouchCalibration.max_y, 28, 240 - 28);
-  */
- 
-  if (touched) {
-    uint16_t xOld = x, yOld = y;
-    y += 22.0 / 152.0 * xOld;
-    //Serial.printf("Press: %d, %d\n", x, y);
-    delay(50);
-  } else {
-    //Serial.println("No Press");
-  }
-
-  data->point.x = x;
-  data->point.y = y;
-  data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
-  
-  return false; /*No buffering now so no more data read*/
-}
-
-extern void load_page_main() ;
-
-extern lv_obj_t* MainScreen;
-
-extern lv_obj_t* txtTime;
-extern lv_obj_t* imgWiFi;
-extern lv_obj_t* imgNexpie;
-
-extern lv_obj_t* txtTemp;
-extern lv_obj_t* txtHumi;
-extern lv_obj_t* txtHumi2;
-extern lv_obj_t* txtLight;
-
-extern void load_page_settings() ;
-
-extern lv_obj_t* SettingsScreen;
-
-extern lv_obj_t* objBoxQRCode;
-lv_obj_t* wifiConnectQRCode;
-
-extern lv_obj_t* txtWiFiSSID;
-extern lv_obj_t* txtWiFiPassword;
-
-extern void load_page_touch_calibration() ;
-extern lv_obj_t* TouchCalibrationScreen;
-
-extern lv_obj_t* objTopLeftTouchPoint;
-extern lv_obj_t* objBottomLeftTouchPoint;
-extern lv_obj_t* objBottomRightTouchPoint;
-extern lv_obj_t* objRightLeftTouchPoint;
-
-extern lv_obj_t* txtTouchCalibrationStep;
-extern lv_obj_t* txtTouchCalibrationCountdown;
-
-void btnGoToSettingsHandle(lv_obj_t *obj, lv_event_t event) {
-  if(event == LV_EVENT_CLICKED) {
-    String qr_code_str = "WIFI:T:WPA;S:Farm1;P:123456789;;";
-    lv_qrcode_update(wifiConnectQRCode, (char*)qr_code_str.c_str(), qr_code_str.length());
-    lv_scr_load(SettingsScreen);
-  }
-}
-
-void SettingsScreenGoBackHandle(lv_obj_t *obj, lv_event_t event) {
-  if(event == LV_EVENT_CLICKED) {
-    lv_scr_load(MainScreen);
-  }
-}
 
 void do_touch_calibration() {
   uint8_t state = 0;
@@ -127,7 +52,7 @@ void do_touch_calibration() {
     uint16_t x, y;
     // tft.getTouchRaw(&x, &y);
     tft.getTouchRaw(&y, &x); // Axis wrong
-    // Serial.printf("x: %5d\ty: %5d\n", x, y);
+    Serial.printf("x: %5d\ty: %5d\n", x, y);
     /* Serial.printf("x: %i     ", x);
     Serial.printf("y: %i     ", y);
     Serial.printf("z: %i \n", tft.getTouchRawZ());*/
@@ -259,7 +184,12 @@ void do_touch_calibration() {
   }
 }
 
-void Display_begin() {
+void setup(void) {
+  Serial.begin(115200);
+  Serial.println("\n\nStarting...");
+
+  tft.init();
+
   tft.begin(); /* TFT init */
   tft.setRotation(3); /* Landscape orientation */
 
@@ -276,95 +206,38 @@ void Display_begin() {
   disp_drv.buffer = &disp_buf;
   lv_disp_drv_register(&disp_drv);
 
-  load_page_main();
-  load_page_settings();
   load_page_touch_calibration();
-
-  // Set all label
-  lv_label_set_text(txtTime, "LOADING");
-  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
-
-  lv_obj_set_hidden(imgWiFi, false);
-  lv_obj_set_hidden(imgNexpie, false);
-
-  lv_label_set_text(txtTemp, "");
-  lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
-
-  lv_label_set_text(txtHumi, "");
-  lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
-
-  lv_label_set_text(txtHumi2, "");
-  lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
-
-  lv_label_set_text(txtLight, "");
-  lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+  
 
   pinMode(LCD_BL_PIN, OUTPUT);
   digitalWrite(LCD_BL_PIN, LOW);
-
-  // do_touch_calibration();
-
-  /*Initialize the (dummy) input device driver*/
-  lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = my_input_read;
-  lv_indev_drv_register(&indev_drv);
-
-  lv_scr_load(MainScreen);
-  // lv_scr_load(SettingsScreen);
-
-  wifiConnectQRCode = lv_qrcode_create(objBoxQRCode, 150, lv_color_hex(0x000000), lv_color_hex(0xFFFFFF));
-  lv_obj_align(wifiConnectQRCode, NULL, LV_ALIGN_CENTER, 0, 0);
+   
+  do_touch_calibration();
 }
 
-void Display_runCycle() {
-  static uint64_t ui_update_timer = 0;
-  if (((millis() - ui_update_timer) >= 300) || (ui_update_timer == 0)) {
-    lv_label_set_text(txtTemp, String(Sensor_get_temp(), 1).c_str());
-    lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
+//====================================================================
 
-    lv_label_set_text(txtHumi, String(Sensor_get_humi(), 1).c_str());
-    lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+void loop() {
+  lv_task_handler();
+  
+  uint16_t x, y;
+  tft.getTouchRaw(&y, &x); // Axis wrong
+  bool isPressed = (x > 0) && (y > 0);
+  Serial.printf("raw_x: %5d\traw_y: %5d\n", x, y);
 
-    lv_label_set_text(txtHumi2, String(Sensor_get_soil(), 1).c_str());
-    lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
-
-    lv_label_set_text(txtLight, String(Sensor_get_lux(), 1).c_str());
-    lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
-
-    if (WiFi.isConnected()) {
-      lv_obj_set_hidden(imgWiFi, false);
-      /*if (client.connected()) {
-        lv_obj_set_hidden(imgNexpie, false);
-      } else {
-        lv_obj_set_hidden(imgNexpie, !lv_obj_get_hidden(imgNexpie));
-      }*/
-    } else {
-      lv_obj_set_hidden(imgWiFi, !lv_obj_get_hidden(imgWiFi));
-      lv_obj_set_hidden(imgNexpie, true);
-    }
-
-    ui_update_timer = millis();
+  x = map(x, TouchCalibration.min_x, TouchCalibration.max_x, 28, 320 - 28);
+  y = map(y, TouchCalibration.min_y, TouchCalibration.max_y, 28, 240 - 28);
+  
+  if (isPressed) {
+    lv_label_set_text(txtTouchCalibrationCountdown, String("(" + String(x) + "," + String(y) + ")").c_str());
+  } else {
+    lv_label_set_text(txtTouchCalibrationCountdown, "Not Press");
   }
+  lv_obj_align(txtTouchCalibrationCountdown, NULL, LV_ALIGN_CENTER, 0, 26);
+  lv_obj_set_hidden(txtTouchCalibrationCountdown, false);
 
-  static uint64_t time_update_timer = 0;
-  if (((millis() - time_update_timer) >= 1000) || (time_update_timer == 0)) {
-    struct tm timeinfo = getSyncTime();
-
-    static char time_str_buff[20];
-    sprintf(time_str_buff, "%02d:%02d:%02d", 
-                            timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    lv_label_set_text(txtTime, time_str_buff);
-    lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 50, 0);
-
-    time_update_timer = millis();
-  }
-
-  static uint64_t lvgl_timer = 0;
-  if (((millis() - lvgl_timer) >= 20) || (lvgl_timer == 0)) {
-    lv_task_handler(); /* let the GUI do its work */
-    lvgl_timer = millis();
-  }
+  delay(5);
 }
+
+//====================================================================
 

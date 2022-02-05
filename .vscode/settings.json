@@ -1,5 +1,21 @@
 {
     "files.associations": {
-        "*.cpp_": "cpp"
+        "*.cpp_": "cpp",
+        "limits": "cpp",
+        "type_traits": "cpp",
+        "array": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "vector": "cpp",
+        "string_view": "cpp",
+        "initializer_list": "cpp",
+        "*.ino_": "cpp",
+        "new": "cpp",
+        "system_error": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp"
     }
 }
