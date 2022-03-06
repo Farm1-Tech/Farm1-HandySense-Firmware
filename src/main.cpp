@@ -23,6 +23,7 @@
 #include <lvgl.h>
 
 #define LCD_BL_PIN 32
+#define NET_PIN    0
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -75,7 +76,9 @@ void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 
-#ifdef DEBUG
+#define DEBUG
+
+#ifndef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
 #define DEBUG_PRINTLN(x)  //Serial.println(x)
 #else
@@ -1136,6 +1139,8 @@ void setup() {
   pinMode(status_sht31_error,         OUTPUT);
   pinMode(status_max44009_error,      OUTPUT);
   pinMode(status_soil_error,          OUTPUT);
+  pinMode(NET_PIN, OUTPUT);
+  digitalWrite(NET_PIN, HIGH);
   digitalWrite(connect_WifiStatusToBox, HIGH);
   digitalWrite(status_sht31_error,      HIGH);
   digitalWrite(status_max44009_error,   HIGH);
@@ -1232,7 +1237,7 @@ void loop() {
   server.handleClient();
   delay(1);
   unsigned long currentTime = millis();
-  if (currentTime - previousTime_Temp_soil >= eventInterval) {
+  if (((currentTime - previousTime_Temp_soil) >= eventInterval) || (previousTime_Temp_soil == 0)) {
     ControlRelay_Bytimmer();
     ControlRelay_BysoilMinMax();
     ControlRelay_BytempMinMax();
@@ -1284,6 +1289,16 @@ void loop() {
     soil_old = soil;
     temp_old = temp;
   }
+
+  if (WiFi.isConnected()) {
+    digitalWrite(NET_PIN, LOW);
+  } else {
+    static uint64_t netLEDtimer = 0;
+    if ((millis() - netLEDtimer) > 300) {
+      netLEDtimer = millis();
+      digitalWrite(NET_PIN, !digitalRead(NET_PIN));
+    }
+  }
   //  if (abs(soil - soil_old) > difference_soil) {
   //    digitalWrite(LEDY, HIGH);
   //    check_sendData_toWeb = 1;
@@ -1301,7 +1316,8 @@ void TaskWifiStatus(void * pvParameters) {
   while (1) {
     connectWifiStatus = cannotConnect;
     WiFi.begin(ssid.c_str(), password.c_str());   
-     
+    
+
     while (WiFi.status() != WL_CONNECTED) {
       DEBUG_PRINTLN("WIFI Not connect !!!");
 

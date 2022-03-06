@@ -1,17 +1,68 @@
 #include "Artron_DS1338.h"
 
 #define DS1338_ADDR 0x68
+#define MCP79411_ADDR 0x6F
+#define RTC_ADDR MCP79411_ADDR
 
-Artron_DS1338::Artron_DS1338(TwoWire *bus) {
+Artron_DS1338::Artron_DS1338(TwoWire *bus, RTC_Type type) {
     this->wire = bus;
+    this->type = type;
 }
 
 bool Artron_DS1338::begin() {
-    this->wire->beginTransmission(DS1338_ADDR);
-    this->wire->write(0x07); // Start at address 0x07
-    this->wire->write(0); // Write 0 to Oscillator Stop Flag for start
-    if (this->wire->endTransmission() != 0) {
-        return false;
+    if (CheckI2CDevice(DS1338_ADDR)) {
+        this->type = DS1338;
+        Serial.println("RTC chip found DS1338");
+    } else if (CheckI2CDevice(MCP79411_ADDR)) {
+        this->type = MCP79411;
+        Serial.println("RTC chip found MCP79411");
+    } else {
+        Serial.println("Error, Not found RTC device");
+    }
+
+    if (this->type == DS1338) {
+        this->devAddr = DS1338_ADDR;
+
+        this->wire->beginTransmission(this->devAddr);
+        this->wire->write(0x07); // Start at address 0x07
+        this->wire->write(0); // Write 0 to Oscillator Stop Flag for start
+        if (this->wire->endTransmission() != 0) {
+            return false;
+        }
+    }
+
+    if (this->type == MCP79411) {
+        this->devAddr = MCP79411_ADDR;
+
+        this->wire->beginTransmission(this->devAddr);
+        this->wire->write(0x00); // Start at address 0
+        if (this->wire->endTransmission() != 0) {
+            return false;
+        }
+
+        size_t len = this->wire->requestFrom(this->devAddr, 1);
+        if (len != 1) {
+            return false;
+        }
+
+        uint8_t rtcsec = this->wire->read();
+        Serial.println((byte) rtcsec, HEX);
+        if ((rtcsec & 0x80) == 0) { // ST flag is 0
+            Serial.printf("Set start flag 0x%02x\n", rtcsec);
+            this->wire->beginTransmission(this->devAddr);
+            this->wire->write(0x00); // Start at address 0
+            this->wire->write(rtcsec | 0x80); // Set ST flag
+            if (this->wire->endTransmission() != 0) {
+                return false;
+            }
+        }
+
+        this->wire->beginTransmission(this->devAddr);
+        this->wire->write(0x07); // Start at address 0
+        this->wire->write(0); // Write 0 to EXTOSC flag, Disable external 32.768 kHz input
+        if (this->wire->endTransmission() != 0) {
+            return false;
+        }
     }
 
     return true;
@@ -22,13 +73,13 @@ bool Artron_DS1338::read(struct tm* timeinfo) {
         return false;
     }
 
-    this->wire->beginTransmission(DS1338_ADDR);
+    this->wire->beginTransmission(this->devAddr);
     this->wire->write(0); // Start at address 0
     if (this->wire->endTransmission() != 0) {
         return false;
     }
 
-    size_t len = this->wire->requestFrom(DS1338_ADDR, 7);
+    size_t len = this->wire->requestFrom(this->devAddr, 7);
     if (len != 7) {
         return false;
     }
@@ -50,14 +101,20 @@ bool Artron_DS1338::read(struct tm* timeinfo) {
 bool Artron_DS1338::write(struct tm* timeinfo) {
     uint8_t buff[7];
     buff[0] = DECtoBCD(timeinfo->tm_sec) & 0x7F;
+    if (this->type == MCP79411) {
+        buff[0] |= 0x80;
+    }
     buff[1] = DECtoBCD(timeinfo->tm_min) & 0x7F;
     buff[2] = DECtoBCD(timeinfo->tm_hour) & 0x3F;
     buff[3] = DECtoBCD(timeinfo->tm_wday) & 0x07;
+    if (this->type == MCP79411) {
+        buff[3] |= (1 << 3); // Set VBATEN flag
+    }
     buff[4] = DECtoBCD(timeinfo->tm_mday) & 0x3F;
     buff[5] = DECtoBCD(timeinfo->tm_mon) & 0x1F;
     buff[6] = DECtoBCD((timeinfo->tm_year + 1900) % 100);
 
-    this->wire->beginTransmission(DS1338_ADDR);
+    this->wire->beginTransmission(this->devAddr);
     this->wire->write(0); // Start at address 0
     this->wire->write(buff, 7);
     if (this->wire->endTransmission() != 0) {
@@ -65,6 +122,11 @@ bool Artron_DS1338::write(struct tm* timeinfo) {
     }
 
     return true;
+}
+
+bool Artron_DS1338::CheckI2CDevice(int addr) {
+    Wire.beginTransmission(addr);
+    return Wire.endTransmission() == 0;
 }
 
 uint8_t Artron_DS1338::BCDtoDEC(uint8_t n) {
