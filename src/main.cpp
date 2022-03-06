@@ -1,11 +1,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <NTPClient.h>
+#include <PubSubClient.h>
+#include <WiFiUdp.h>
 #include <ArduinoJson.h>
-
 #include <EEPROM.h>
 #include <StreamUtils.h>
-#include "Adafruit_SHT31.h"
+// #include "Adafruit_SHT31.h"
 #include <BH1750.h>
 #include "Max44009.h"
 // #include "RTClib.h"
@@ -16,36 +18,68 @@
 #include <Update.h>
 #include <SPI.h>
 #include "Artron_DS1338.h"
+#include "Artron_SHT20.h"
 #include <TFT_eSPI.h>
 #include <lvgl.h>
 
-#include "Farm1.h"
-#include "MemConfigs.h"
-#include "HandySenseWebSerial.h"
-#include "NETPIE.h"
-#include "TimeManager.h"
-#include "SensorManager.h"
-#include "RelayControl.h"
-#include "Display.h"
+#define LCD_BL_PIN 32
+#define NET_PIN    0
 
-#include "debug.h"
+TFT_eSPI tft = TFT_eSPI();
+
+static lv_disp_buf_t disp_buf;
+static lv_color_t buf[LV_HOR_RES_MAX * 10];
+
+/* Display flushing */
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+  uint32_t w = (area->x2 - area->x1 + 1);
+  uint32_t h = (area->y2 - area->y1 + 1);
+
+  tft.startWrite();
+  tft.setAddrWindow(area->x1, area->y1, w, h);
+  tft.pushColors(&color_p->full, w * h, true);
+  tft.endWrite();
+
+  lv_disp_flush_ready(disp);
+}
+
+bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
+  uint16_t x = 0, y = 0;
+  bool touched = tft.getTouch(&x, &y, 500);
+
+  data->point.x = x;
+  data->point.y = y;
+  data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  
+  return false; /*No buffering now so no more data read*/
+}
+
+extern void load_page() ;
+
+extern lv_obj_t* txtTime;
+extern lv_obj_t* imgWiFi;
+extern lv_obj_t* imgNexpie;
+
+extern lv_obj_t* txtTemp;
+extern lv_obj_t* txtHumi;
+extern lv_obj_t* txtHumi2;
+extern lv_obj_t* txtLight;
 
 void timmer_setting(String topic, byte * payload, unsigned int length) ;
 void SoilMaxMin_setting(String topic, String message, unsigned int length) ;
-
 void Get_soil() ;
-void Get_sht31() ;
-
+void Get_sht() ;
 void TaskWifiStatus(void * pvParameters) ;
+void TaskWaitSerial(void * WaitSerial) ;
 void sent_dataTimer(String topic, String message) ;
 void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
+bool SmartConfigCheck() ;
 
-extern unsigned int time_open[4][7][3] ;
-extern unsigned int time_close[4][7][3] ;
+#define DEBUG
 
-#ifdef DEBUG
+#ifndef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
 #define DEBUG_PRINTLN(x)  //Serial.println(x)
 #else
@@ -191,20 +225,23 @@ int curentTimerError = 0;
 BH1750 lightMeter(0x23); // ADDR connect to GND
 
 // ประกาศตัวแปรเรียกใช้ SHT31
-Adafruit_SHT31 sht31 = Adafruit_SHT31();
+// Adafruit_SHT31 sht31 = Adafruit_SHT31();
+Artron_SHT20 sht(&Wire);
 
 // ประกาศตัวแปรเก็บค่า Soil_moisture_sensor
 #define Soil_moisture_sensorPin   A0
 float sensorValue_soil_moisture   = 0.00,
       voltageValue_soil_moisture  = 0.00,
       percent_soil_moisture       = 0.00;
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
 
 // ประกาศเพื่อเก็บข้อมูล Min Max ของค่าเซ็นเซอร์ Temp และ Soil
 char msg_Minsoil[100],
      msg_Maxsoil[100];
 char msg_Mintemp[100],
      msg_Maxtemp[100];
+
+int LEDR = -1,  // LED 26= Blue => แสดงสถานะเชื่อมต่อ Wifi
+    LEDY = -1;  // LED 27 = Yenllow => แสดงสถานะส่งข้อมูล, โหมดเชื่อต่อ
 
 const unsigned long eventInterval             = 1 * 1000;          // อ่านค่า temp และ soil sensor ทุก ๆ 1 วินาที
 const unsigned long eventInterval_brightness  = 6 * 1000;          // อ่านค่า brightness sensor ทุก ๆ 6 วินาที
@@ -214,6 +251,28 @@ unsigned long previousTime_brightness         = 0;
 // ประกาศตัวแปรกำหนดการนับเวลาเริ่มต้น
 unsigned long previousTime_Update_data        = 0;
 const unsigned long eventInterval_publishData = 2 * 60 * 1000;     // เช่น 2*60*1000 ส่งทุก 2 นาที
+
+float difference_soil                         = 20.00,    // ค่าความชื้นดินแตกต่างกัน +-20 % เมื่อไรส่งค่าขึ้น Web app ทันที
+      difference_temp                         = 4.00;     // ค่าอุณหภูมิแตกต่างกัน +- 4 C เมื่อไรส่งค่าขึ้น Web app ทันที
+float soil_old  = 0.00,
+      temp_old  = 0.00;
+
+// ประกาศตัวแปรสำหรับเก็บค่าเซ็นเซอร์
+float   temp              = 0;
+int     temp_error        = 0;
+int     temp_error_count  = 0;
+
+float   humidity          = 0;
+int     hum_error         = 0;
+int     hum_error_count   = 0;
+
+float   lux_44009         = 0;
+int     lux_error         = 0;
+int     lux_error_count   = 0;
+
+float   soil              = 0;
+int     soil_error        = 0;
+int     soil_error_count  = 0;
 
 // Array สำหรับทำ Movie Arg. ของค่าเซ็นเซอร์ทุก ๆ ค่า
 float ma_temp[5];
@@ -236,11 +295,74 @@ int t[20];
 #define value_hour_Close          t[11]
 #define value_min_Close           t[12]
 
+#define OPEN        1
+#define CLOSE       0
+
+#define Open_relay(j)    digitalWrite(relay_pin[j], HIGH)
+#define Close_relay(j)   digitalWrite(relay_pin[j], LOW)
+
+#define connect_WifiStatusToBox     -1
+
+/* new PCB Red */
+int relay_pin[4] = {25, 14, 12, 13};
+#define status_sht31_error          -1
+#define status_max44009_error       -1
+#define status_soil_error           -1
+
+// ตัวแปรเก็บค่าการตั้งเวลาทำงานอัตโนมัติ
+unsigned int time_open[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  }
+};
+unsigned int time_close[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  },
+  { {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
+    {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000}
+  }
+};
+
+float Max_Soil[4], Min_Soil[4];
+float Max_Temp[4], Min_Temp[4];
+
+unsigned int statusTimer_open[4] = {1, 1, 1, 1};
+unsigned int statusTimer_close[4] = {1, 1, 1, 1};
+unsigned int status_manual[4];
+
+unsigned int statusSoil[4];
+unsigned int statusTemp[4];
+
 // สถานะการทำงานของ Relay ด้ววยค่า Min Max
 int relayMaxsoil_status[4];
 int relayMinsoil_status[4];
 int relayMaxtemp_status[4];
 int relayMintemp_status[4];
+
+int RelayStatus[4];
+TaskHandle_t WifiStatus, WaitSerial;
+unsigned int oldTimer;
+
+// สถานะการรเชื่อมต่อ wifi
+#define cannotConnect   0
+#define wifiConnected   1
+#define serverConnected 2
+#define editDeviceWifi  3
+int connectWifiStatus = cannotConnect;
 
 int check_sendData_status = 0;
 int check_sendData_toWeb  = 0;
@@ -250,6 +372,182 @@ int check_sendData_tempMinMax = 0;
 #define INTERVAL_MESSAGE 600000 //10 นาที
 #define INTERVAL_MESSAGE2 1500000 //1 ชม
 unsigned long time_restart = 0;
+
+/* ----------------------- OTA Function => One on One --------------------------- */
+void OTA_update() {
+  DEBUG_PRINTLN("");
+  DEBUG_PRINT("Connected to "); DEBUG_PRINTLN(ssid);
+  DEBUG_PRINT("IP address: ");  DEBUG_PRINTLN(WiFi.localIP());
+  if (!MDNS.begin(host)) {}
+  DEBUG_PRINTLN("mDNS responder started");
+  /*return index page which is stored in serverIndex */
+  server.on("/", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", loginIndex);
+  });
+  server.on("/serverIndex", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", serverIndex);
+  });
+  /*handling uploading firmware file */
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      /* flashing firmware to ESP*/
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+  server.begin();
+}
+
+/* --------- Callback function get data from web ---------- */
+void callback(String topic, byte* payload, unsigned int length) {
+  //DEBUG_PRINT("Message arrived [");
+  DEBUG_PRINT("Message arrived [");
+  DEBUG_PRINT(topic);
+  DEBUG_PRINT("] ");
+  String message;
+  for (int i = 0; i < length; i++) {
+    message = message + (char)payload[i];
+  }
+  /* ------- topic timer ------- */
+  if (topic.substring(0, 14) == "@private/timer") {
+    timmer_setting(topic, payload, length);
+    sent_dataTimer(topic, message);
+  }
+  /* ------- topic manual_control relay ------- */
+  else if (topic.substring(0, 12) == "@private/led") {
+    status_manual[0] = 0;
+    status_manual[1] = 0;
+    status_manual[2] = 0;
+    status_manual[3] = 0;
+    ControlRelay_Bymanual(topic, message, length);
+  }
+  /* ------- topic Soil min max ------- */
+  else if (topic.substring(0, 17) == "@private/max_temp" || topic.substring(0, 17) == "@private/min_temp") {
+    TempMaxMin_setting(topic, message, length);
+  }
+  /* ------- topic Temp min max ------- */
+  else if (topic.substring(0, 17) == "@private/max_soil" || topic.substring(0, 17) == "@private/min_soil") {
+    SoilMaxMin_setting(topic, message, length);
+  }
+}
+
+/* ----------------------- Sent Timer --------------------------- */
+void sent_dataTimer(String topic, String message) {
+  String _numberTimer = topic.substring(topic.length() - 2).c_str();
+  String _payload = "{\"data\":{\"value_timer";
+  _payload += _numberTimer;
+  _payload += "\":\"";
+  _payload += message;
+  _payload += "\"}}";
+  DEBUG_PRINT("incoming : "); DEBUG_PRINTLN((char*)_payload.c_str());
+  client.publish("@shadow/data/update", (char*)_payload.c_str());
+}
+
+/* --------- UpdateData_To_Server --------- */
+// void UpdateData_To_Server() {
+//   String DatatoWeb;
+//   char msgtoWeb[200];
+//   if (check_sendData_toWeb == 1) {
+//     DatatoWeb = "{\"data\": {\"temperature\":" + String(temp) +
+//                 ",\"humidity\":" + String(humidity) + ",\"lux\":" +
+//                 String(lux_44009) + ",\"soil\":" + String(soil)  + "}}";
+
+//     DEBUG_PRINT("DatatoWeb : "); DEBUG_PRINTLN(DatatoWeb);
+//     DatatoWeb.toCharArray(msgtoWeb, (DatatoWeb.length() + 1));
+//     if (client.publish("@shadow/data/update", msgtoWeb)) {
+//       check_sendData_toWeb = 0;
+//       DEBUG_PRINTLN(" Send Data Complete ");
+//     }
+//     digitalWrite(LEDY, HIGH);
+//   }
+// }
+
+/* --------- UpdateData_To_Server --------- */
+void UpdateData_To_Server() {
+  String DatatoWeb;
+    char msgtoWeb[200];
+    DatatoWeb = "{\"data\": {\"temperature\":" + String(temp) +
+                ",\"humidity\":" + String(humidity) + ",\"lux\":" +
+                String(lux_44009) + ",\"soil\":" + String(soil)  + "}}";
+
+    DEBUG_PRINT("DatatoWeb : "); DEBUG_PRINTLN(DatatoWeb);
+    DatatoWeb.toCharArray(msgtoWeb, (DatatoWeb.length() + 1));
+    if (client.publish("@shadow/data/update", msgtoWeb)) {
+      DEBUG_PRINTLN(" Send Data Complete ");
+    }
+}
+
+/* --------- sendStatus_RelaytoWeb --------- */
+void sendStatus_RelaytoWeb() {
+  String _payload;
+  char msgUpdateRalay[200];
+  if (check_sendData_status == 1) {
+    _payload = "{\"data\": {\"led0\":\"" + String(RelayStatus[0]) +
+               "\",\"led1\":\"" + String(RelayStatus[1]) +
+               "\",\"led2\":\"" + String(RelayStatus[2]) +
+               "\",\"led3\":\"" + String(RelayStatus[3]) + "\"}}";
+    DEBUG_PRINT("_payload : "); DEBUG_PRINTLN(_payload);
+    _payload.toCharArray(msgUpdateRalay, (_payload.length() + 1));
+    if (client.publish("@shadow/data/update", msgUpdateRalay)) {
+      check_sendData_status = 0;
+      DEBUG_PRINTLN(" Send Complete Relay ");
+    }
+  }
+}
+
+/* --------- Respone soilMinMax toWeb --------- */
+void send_soilMinMax() {
+  String soil_payload;
+  char soilMinMax_data[450];
+  if (check_sendData_SoilMinMax == 1) {
+    soil_payload =  "{\"data\": {\"min_soil0\":" + String(Min_Soil[0]) + ",\"max_soil0\":" + String(Max_Soil[0]) +
+                    ",\"min_soil1\":" + String(Min_Soil[1]) + ",\"max_soil1\":" + String(Max_Soil[1]) +
+                    ",\"min_soil2\":" + String(Min_Soil[2]) + ",\"max_soil2\":" + String(Max_Soil[2]) +
+                    ",\"min_soil3\":" + String(Min_Soil[3]) + ",\"max_soil3\":" + String(Max_Soil[3]) + "}}";
+    DEBUG_PRINT("_payload : "); DEBUG_PRINTLN(soil_payload);
+    soil_payload.toCharArray(soilMinMax_data, (soil_payload.length() + 1));
+    if (client.publish("@shadow/data/update", soilMinMax_data)) {
+      check_sendData_SoilMinMax = 0;
+      DEBUG_PRINTLN(" Send Complete min max ");
+    }
+  }
+}
+
+/* --------- Respone tempMinMax toWeb --------- */
+void send_tempMinMax() {
+  String temp_payload;
+  char tempMinMax_data[400];
+  if (check_sendData_tempMinMax == 1) {
+    temp_payload =  "{\"data\": {\"min_temp0\":" + String(Min_Temp[0]) + ",\"max_temp0\":" + String(Max_Temp[0]) +
+                    ",\"min_temp1\":" + String(Min_Temp[1]) + ",\"max_temp1\":" + String(Max_Temp[1]) +
+                    ",\"min_temp2\":" + String(Min_Temp[2]) + ",\"max_temp2\":" + String(Max_Temp[2]) +
+                    ",\"min_temp3\":" + String(Min_Temp[3]) + ",\"max_temp3\":" + String(Max_Temp[3]) + "}}";
+    DEBUG_PRINT("_payload : "); DEBUG_PRINTLN(temp_payload);
+    temp_payload.toCharArray(tempMinMax_data, (temp_payload.length() + 1));
+    if (client.publish("@shadow/data/update", tempMinMax_data)) {
+      check_sendData_tempMinMax = 0;
+    }
+  }
+}
 
 /* ----------------------- Setting Timer --------------------------- */
 void timmer_setting(String topic, byte * payload, unsigned int length) {
@@ -283,11 +581,11 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
         time_close[relay][k][timer] = 3000;
       }
       int address = ((((relay * 7 * 3) + (k * 3) + timer) * 2) * 2) + 2100;
-      /*EEPROM.write(address, time_open[relay][k][timer] / 256);
+      EEPROM.write(address, time_open[relay][k][timer] / 256);
       EEPROM.write(address + 1, time_open[relay][k][timer] % 256);
       EEPROM.write(address + 2, time_close[relay][k][timer] / 256);
       EEPROM.write(address + 3, time_close[relay][k][timer] % 256);
-      EEPROM.commit();*/
+      EEPROM.commit();
       DEBUG_PRINT("time_open  : "); DEBUG_PRINTLN(time_open[relay][k][timer]);
       DEBUG_PRINT("time_close : "); DEBUG_PRINTLN(time_close[relay][k][timer]);
     }
@@ -297,17 +595,113 @@ void timmer_setting(String topic, byte * payload, unsigned int length) {
       time_open[relay][k][timer] = 3000;
       time_close[relay][k][timer] = 3000;
       int address = ((((relay * 7 * 3) + (k * 3) + timer) * 2) * 2) + 2100;
-      /*EEPROM.write(address, time_open[relay][k][timer] / 256);
+      EEPROM.write(address, time_open[relay][k][timer] / 256);
       EEPROM.write(address + 1, time_open[relay][k][timer] % 256);
       EEPROM.write(address + 2, time_close[relay][k][timer] / 256);
       EEPROM.write(address + 3, time_close[relay][k][timer] % 256);
-      EEPROM.commit();*/
+      EEPROM.commit();
       DEBUG_PRINT("time_open  : "); DEBUG_PRINTLN(time_open[relay][k][timer]);
       DEBUG_PRINT("time_close : "); DEBUG_PRINTLN(time_close[relay][k][timer]);
     }
   }
   else {
     DEBUG_PRINTLN("Not enabled timer, Day !!!");
+  }
+}
+
+/* ------------ Control Relay By Timmer ------------- */
+void ControlRelay_Bytimmer() {
+  int curentTimer;
+  int dayofweek;
+  bool getTimeFromInternet = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
+    if (getLocalTime(&timeinfo)) {
+      getTimeFromInternet = true;
+    }
+  }
+  if (!getTimeFromInternet) {
+    rtc.read(&timeinfo);
+    DEBUG_PRINT("USE RTC 1");
+  }
+  
+  yearNow     = timeinfo.tm_year + 1900;
+  monthNow    = timeinfo.tm_mon + 1;
+  dayNow      = timeinfo.tm_mday;
+  weekdayNow  = timeinfo.tm_wday;
+  hourNow     = timeinfo.tm_hour;
+  minuteNow   = timeinfo.tm_min;
+  secondNow   = timeinfo.tm_sec;
+
+  curentTimer = (hourNow * 60) + minuteNow;
+  dayofweek = weekdayNow - 1;
+  
+  static char time_str_buff[20];
+  sprintf(time_str_buff, "%02d:%02d:%02d", hourNow, minuteNow, secondNow);
+  lv_label_set_text(txtTime, time_str_buff);
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
+
+  //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
+  /* check curentTimer => 0-1440 */
+  if (curentTimer < 0 || curentTimer > 1440) {
+    curentTimerError = 1;
+    DEBUG_PRINT("curentTimerError : "); DEBUG_PRINTLN(curentTimerError);
+  } else {
+    curentTimerError = 0;
+    if (dayofweek == -1) {
+      dayofweek = 6;
+    }
+    //DEBUG_PRINT("dayofweek   : "); DEBUG_PRINTLN(dayofweek);
+    if (curentTimer != oldTimer) {
+      for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 3; j++) {
+          if (time_open[i][dayofweek][j] == curentTimer) {
+            RelayStatus[i] = 1;
+            check_sendData_status = 1;
+            Open_relay(i);
+            DEBUG_PRINTLN("timer On");
+            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
+            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
+          }
+          else if (time_close[i][dayofweek][j] == curentTimer) {
+            RelayStatus[i] = 0;
+            check_sendData_status = 1;
+            Close_relay(i);
+            DEBUG_PRINTLN("timer Off");
+            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
+            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
+          }
+          else if (time_open[i][dayofweek][j] == 3000 && time_close[i][dayofweek][j] == 3000) {
+            //        Close_relay(i);
+            //        DEBUG_PRINTLN(" Not check day, Not Working relay");
+          }
+        }
+      }
+      oldTimer = curentTimer;
+    }
+  }
+}
+
+/* ----------------------- Manual Control --------------------------- */
+void ControlRelay_Bymanual(String topic, String message, unsigned int length) {
+  String manual_message = message;
+  int manual_relay = topic.substring(topic.length() - 1).toInt();
+  DEBUG_PRINTLN();
+  DEBUG_PRINT("manual_message : "); DEBUG_PRINTLN(manual_message);
+  DEBUG_PRINT("manual_relay   : "); DEBUG_PRINTLN(manual_relay);
+  if (status_manual[manual_relay] == 0) {
+    status_manual[manual_relay] = 1;
+    if (manual_message == "on") {
+      Open_relay(manual_relay);
+      RelayStatus[manual_relay] = 1;
+      DEBUG_PRINTLN("ON man");
+    }
+    else if (manual_message == "off") {
+      Close_relay(manual_relay);
+      RelayStatus[manual_relay] = 0;
+      DEBUG_PRINTLN("OFF man");
+    }
+    check_sendData_status = 1;
   }
 }
 
@@ -318,26 +712,43 @@ void SoilMaxMin_setting(String topic, String message, unsigned int length) {
   int Relay_SoilMaxMin = topic.substring(topic.length() - 1).toInt();
   if (soil_topic.substring(9, 12) == "max") {
     relayMaxsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
-    // Max_Soil[Relay_SoilMaxMin] = soil_message.toInt();
-    //EEPROM.write(Relay_SoilMaxMin + 2000,  Max_Soil[Relay_SoilMaxMin]);
-    //EEPROM.commit();
+    Max_Soil[Relay_SoilMaxMin] = soil_message.toInt();
+    EEPROM.write(Relay_SoilMaxMin + 2000,  Max_Soil[Relay_SoilMaxMin]);
+    EEPROM.commit();
     check_sendData_SoilMinMax = 1;
-    // DEBUG_PRINT("Max_Soil : "); DEBUG_PRINTLN(Max_Soil[Relay_SoilMaxMin]);
+    DEBUG_PRINT("Max_Soil : "); DEBUG_PRINTLN(Max_Soil[Relay_SoilMaxMin]);
   }
   else if (soil_topic.substring(9, 12) == "min") {
     relayMinsoil_status[Relay_SoilMaxMin] = topic.substring(topic.length() - 1).toInt();
-    // Min_Soil[Relay_SoilMaxMin] = soil_message.toInt();
-    //EEPROM.write(Relay_SoilMaxMin + 2004,  Min_Soil[Relay_SoilMaxMin]);
-    //EEPROM.commit();
+    Min_Soil[Relay_SoilMaxMin] = soil_message.toInt();
+    EEPROM.write(Relay_SoilMaxMin + 2004,  Min_Soil[Relay_SoilMaxMin]);
+    EEPROM.commit();
     check_sendData_SoilMinMax = 1;
-    // DEBUG_PRINT("Min_Soil : "); DEBUG_PRINTLN(Min_Soil[Relay_SoilMaxMin]);
+    DEBUG_PRINT("Min_Soil : "); DEBUG_PRINTLN(Min_Soil[Relay_SoilMaxMin]);
   }
 }
 
 /* ----------------------- TempMaxMin_setting --------------------------- */
+void TempMaxMin_setting(String topic, String message, unsigned int length) {
+  String temp_message = message;
+  String temp_topic = topic;
+  int Relay_TempMaxMin = topic.substring(topic.length() - 1).toInt();
+  if (temp_topic.substring(9, 12) == "max") {
+    Max_Temp[Relay_TempMaxMin] = temp_message.toInt();
+    EEPROM.write(Relay_TempMaxMin + 2008, Max_Temp[Relay_TempMaxMin]);
+    EEPROM.commit();
+    check_sendData_tempMinMax = 1;
+    DEBUG_PRINT("Max_Temp : "); DEBUG_PRINTLN(Max_Temp[Relay_TempMaxMin]);
+  }
+  else if (temp_topic.substring(9, 12) == "min") {
+    Min_Temp[Relay_TempMaxMin] = temp_message.toInt();
+    EEPROM.write(Relay_TempMaxMin + 2012,  Min_Temp[Relay_TempMaxMin]);
+    EEPROM.commit();
+    check_sendData_tempMinMax = 1;
+    DEBUG_PRINT("Min_Temp : "); DEBUG_PRINTLN(Min_Temp[Relay_TempMaxMin]);
+  }
+}
 
-<<<<<<< HEAD
-=======
 /* ----------------------- soilMinMax_ControlRelay --------------------------- */
 void ControlRelay_BysoilMinMax() {
   Get_soil();
@@ -373,7 +784,7 @@ void ControlRelay_BysoilMinMax() {
 
 /* ----------------------- tempMinMax_ControlRelay --------------------------- */
 void ControlRelay_BytempMinMax() {
-  Get_sht31();
+  Get_sht();
   for (int g = 0; g < 4; g++) {
     if (Min_Temp[g] != 0 && Max_Temp[g] != 0) {
       if (temp < Min_Temp[g]) {
@@ -423,13 +834,13 @@ int Mode(float* getdata) {
 }
 
 /* ----------------------- Calculator sensor SHT31  --------------------------- */
-void Get_sht31() {
+void Get_sht() {
   float buffer_temp = 0;
   float buffer_hum  = 0;
   float temp_cal    = 0;
   int num_temp      = 0;
-  buffer_temp = sht31.readTemperature();
-  buffer_hum = sht31.readHumidity();
+  buffer_temp = sht.readTemperature();
+  buffer_hum = sht.readHumidity();
   if (buffer_temp < -40 || buffer_temp > 125 || isnan(buffer_temp)) { // range -40 to 125 C
     if (temp_error_count >= 10) {
       temp_error = 1;
@@ -568,16 +979,14 @@ void printLocalTime() {
     return;
   } //DEBUG_PRINTLN(&timeinfo, "%A, %d %B %Y %H:%M:%S");
 }
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
 
 /* ----------------------- Set All Config --------------------------- */
 void setAll_config() {
   for (int b = 0; b < 4; b++) {
-    /*Max_Soil[b] = EEPROM.read(b + 2000);
+    Max_Soil[b] = EEPROM.read(b + 2000);
     Min_Soil[b] = EEPROM.read(b + 2004);
     Max_Temp[b] = EEPROM.read(b + 2008);
-    Min_Temp[b] = EEPROM.read(b + 2012);*/
-    /*
+    Min_Temp[b] = EEPROM.read(b + 2012);
     if (Max_Soil[b] >= 255) {
       Max_Soil[b] = 0;
     }
@@ -594,15 +1003,14 @@ void setAll_config() {
     DEBUG_PRINT("Min_Soil   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Min_Soil[b]);
     DEBUG_PRINT("Max_Temp   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Max_Temp[b]);
     DEBUG_PRINT("Min_Temp   ");  DEBUG_PRINT(b); DEBUG_PRINT(" : "); DEBUG_PRINTLN(Min_Temp[b]);
-    */
   }
   int count_in = 0;
   for (int eeprom_relay = 0; eeprom_relay < 4; eeprom_relay++) {
     for (int eeprom_timer = 0; eeprom_timer < 3; eeprom_timer++) {
       for (int dayinweek = 0; dayinweek < 7; dayinweek++) {
         int eeprom_address = ((((eeprom_relay * 7 * 3) + (dayinweek * 3) + eeprom_timer) * 2) * 2) + 2100;
-        // time_open[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address) * 256) + (EEPROM.read(eeprom_address + 1));
-        // time_close[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address + 2) * 256) + (EEPROM.read(eeprom_address + 3));
+        time_open[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address) * 256) + (EEPROM.read(eeprom_address + 1));
+        time_close[eeprom_relay][dayinweek][eeprom_timer] = (EEPROM.read(eeprom_address + 2) * 256) + (EEPROM.read(eeprom_address + 3));
 
         if (time_open[eeprom_relay][dayinweek][eeprom_timer] >= 2000) {
           time_open[eeprom_relay][dayinweek][eeprom_timer] = 3000;
@@ -619,14 +1027,106 @@ void setAll_config() {
   }
 }
 
-void setup() {
-  Serial.begin(115200);
+/* ----------------------- Delete All Config --------------------------- */
+void Delete_All_config() {
+  for (int b = 2000; b < 4096; b++) {
+    EEPROM.write(b, 255);
+    EEPROM.commit();
+  }
+}
 
-  // Init I2C
+/* ----------------------- Add and Edit device || Edit Wifi --------------------------- */
+void Edit_device_wifi() {
+  connectWifiStatus = editDeviceWifi;
+  EepromStream eeprom(0, 1024);
+  Serial.write(START_PATTERN, 3);               // ส่งข้อมูลชนิดไบต์ ส่งตัวอักษรไปบนเว็บ
+  Serial.flush();                               // เครียบัฟเฟอร์ให้ว่าง
+  deserializeJson(jsonDoc, eeprom);             // คือการรับหรืออ่านข้อมูล jsonDoc ใน eeprom
+  client_old = jsonDoc["client"].as<String>();  // เก็บค่า client เก่าเพื่อเช็คกับ client ใหม่ ในการ reset Wifi ไม่ให้ลบค่า Config อื่นๆ
+  Serial.write(STX);                            // 02 คือเริ่มส่ง
+  serializeJsonPretty(jsonDoc, Serial);         // ส่งข่อมูลของ jsonDoc ไปบนเว็บ
+  Serial.write(ETX);
+  delay(1000);
+  Serial.write(START_PATTERN, 3);               // ส่งข้อมูลชนิดไบต์ ส่งตัวอักษรไปบนเว็บ
+  Serial.flush();
+  jsonDoc["server"]   = NULL;
+  jsonDoc["client"]   = NULL;
+  jsonDoc["pass"]     = NULL;
+  jsonDoc["user"]     = NULL;
+  jsonDoc["password"] = NULL;
+  jsonDoc["port"]     = NULL;
+  jsonDoc["ssid"]     = NULL;
+  jsonDoc["command"]  = NULL;
+  Serial.write(STX);                      // 02 คือเริ่มส่ง
+  serializeJsonPretty(jsonDoc, Serial);   // ส่งข่อมูลของ jsonDoc ไปบนเว็บ
+  Serial.write(ETX);                      // 03 คือจบ
+}
+
+/* -------- webSerialJSON function ------- */
+void webSerialJSON() {
+  while (Serial.available() > 0) {
+    Serial.setTimeout(10000);
+    EepromStream eeprom(0, 1024);
+    DeserializationError err = deserializeJson(jsonDoc, Serial);
+    if (err == DeserializationError::Ok) {
+      String command  =  jsonDoc["command"].as<String>();
+      bool isValidData  =  !jsonDoc["client"].isNull();
+      if (command == "restart") {
+        delay(100);
+        ESP.restart();
+      }
+      if (isValidData) {
+        /* ------------------WRITING----------------- */
+        serializeJson(jsonDoc, eeprom);
+        eeprom.flush();
+        // ถ้าไม่เหมือนคือเพิ่มอุปกรณ์ใหม่ // ถ้าเหมือนคือการเปลี่ยน wifi
+        if (client_old != jsonDoc["client"].as<String>()) {
+          Delete_All_config();
+        }
+        delay(100);
+        ESP.restart();
+      }
+    }  else  {
+      Serial.read();
+    }
+  }
+}
+
+/* --------- อินเตอร์รัป แสดงสถานะการเชื่อม wifi ------------- */
+int buff_count_LED_serverConnected;
+void IRAM_ATTR Blink_LED() {
+  if (connectWifiStatus == editDeviceWifi) {
+    digitalWrite(LEDR, HIGH);
+    digitalWrite(connect_WifiStatusToBox, HIGH);
+    digitalWrite(LEDY, !digitalRead(LEDY));
+  } else  if (connectWifiStatus == cannotConnect) {
+    digitalWrite(LEDY, HIGH);
+    digitalWrite(LEDR, !digitalRead(LEDR));
+    digitalWrite(connect_WifiStatusToBox, HIGH);
+  } else if (connectWifiStatus == serverConnected) {
+    digitalWrite(LEDR, LOW);
+    digitalWrite(LEDY, LOW);
+    digitalWrite(connect_WifiStatusToBox, LOW);
+  } else if (connectWifiStatus == wifiConnected) {
+    buff_count_LED_serverConnected++;
+    if (buff_count_LED_serverConnected < 7) {
+      digitalWrite(LEDR, !digitalRead(LEDR));
+    } else if (buff_count_LED_serverConnected < 10) {
+      digitalWrite(LEDR, LOW);
+    } else buff_count_LED_serverConnected = 0;
+  }
+}
+
+void setup() {
+  hw_timer_t * timer = NULL;
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &Blink_LED, true);
+  timerAlarmWrite(timer, 500000, true);
+  timerAlarmEnable(timer);
+  Serial.begin(115200);
+  EEPROM.begin(4096);
   Wire.begin();
   Wire.setClock(10000);
-<<<<<<< HEAD
-=======
   rtc.begin();
   lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
   pinMode(Soil_moisture_sensorPin, INPUT);
@@ -640,6 +1140,8 @@ void setup() {
   pinMode(status_sht31_error,         OUTPUT);
   pinMode(status_max44009_error,      OUTPUT);
   pinMode(status_soil_error,          OUTPUT);
+  pinMode(NET_PIN, OUTPUT);
+  digitalWrite(NET_PIN, HIGH);
   digitalWrite(connect_WifiStatusToBox, HIGH);
   digitalWrite(status_sht31_error,      HIGH);
   digitalWrite(status_max44009_error,   HIGH);
@@ -648,8 +1150,9 @@ void setup() {
   digitalWrite(relay_pin[1], LOW);
   digitalWrite(relay_pin[2], LOW);
   digitalWrite(relay_pin[3], LOW);
-  if (!sht31.begin(0x44)) {
-    Serial.println("Init SHT31 error, Sensor not connect ?");
+  // if (!sht31.begin(0x44)) {
+  if (!sht.begin()) {
+    Serial.println("Init SHT20 error, Sensor not connect ?");
   }
   for (int x = 0; x < 20; x++) {
     digitalWrite(LEDY, 0);    digitalWrite(LEDR, 1);    delay(50);
@@ -679,30 +1182,31 @@ void setup() {
   indev_drv.type = LV_INDEV_TYPE_POINTER;
   indev_drv.read_cb = my_input_read;
   lv_indev_drv_register(&indev_drv);
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
 
-  // Init configs manager
-  MemConfigs_begin();
-  
-  // Handle all command from HandySense via Serial
-  HandySenseWebSerial_begin();
-  
-  // Init Sensor
-  SensorManager_begin();
+  load_page();
 
-  // Init NETPIE
-  NETPIE_begin();
+  // Set all label
+  lv_label_set_text(txtTime, "LOADING");
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
 
-  // Init RTC & NTP
-  Time_begin();
+  lv_obj_set_hidden(imgWiFi, false);
+  lv_obj_set_hidden(imgNexpie, false);
 
-  // Init Relay
-  RelayControl_begin();
+  lv_label_set_text(txtTemp, "");
+  lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
 
-<<<<<<< HEAD
-  // Init TFT LCD & LVGL
-  Display_begin();
-=======
+  lv_label_set_text(txtHumi, "");
+  lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+
+  lv_label_set_text(txtHumi2, "");
+  lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
+
+  lv_label_set_text(txtLight, "");
+  lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+
+  pinMode(LCD_BL_PIN, OUTPUT);
+  digitalWrite(LCD_BL_PIN, LOW);
+
   Edit_device_wifi();
   EepromStream eeprom(0, 1024);           // ประกาศ Object eepromSteam ที่ Address 0 ขนาด 1024 byte
   deserializeJson(jsonDoc, eeprom);       // คือการรับหรืออ่านข้อมูล jsonDoc ใน eeprom
@@ -722,19 +1226,234 @@ void setup() {
   sensorValue_soil_moisture = analogRead(Soil_moisture_sensorPin);
   voltageValue_soil_moisture = (sensorValue_soil_moisture * 3.3) / (4095.00);
   ma_soil[0] = ma_soil[1] = ma_soil[2] = ma_soil[3] = ma_soil[4] = ((-58.82) * voltageValue_soil_moisture) + 123.52;
-  ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht31.readTemperature();
-  ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht31.readHumidity();
+  ma_temp[0] =  ma_temp[1] =  ma_temp[2] =  ma_temp[3] =  ma_temp[4] = sht.readTemperature();
+  ma_hum[0] = ma_hum[1] = ma_hum[2] = ma_hum[3] = ma_hum[4] = sht.readHumidity();
   // ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = myLux.getLux() / 1000;
   ma_lux[0] = ma_lux[1] = ma_lux[2] = ma_lux[3] = ma_lux[4] = lightMeter.readLightLevel() / 1000; // lux to klux
->>>>>>> parent of 300584a (Change: SHT30 -> SHT20)
 }
 
 void loop() {
-  SensorManager_runCycle();
-  NETPIE_runCycle();
-  HandySenseWebSerial_runCycle();
-  RelayControl_runCycle();
-  Display_runCycle();
-  
+  lv_task_handler(); /* let the GUI do its work */
+  client.loop();
+  server.handleClient();
   delay(1);
+  unsigned long currentTime = millis();
+  if (((currentTime - previousTime_Temp_soil) >= eventInterval) || (previousTime_Temp_soil == 0)) {
+    ControlRelay_Bytimmer();
+    ControlRelay_BysoilMinMax();
+    ControlRelay_BytempMinMax();
+
+    DEBUG_PRINTLN("");
+    DEBUG_PRINT("Temp : ");       DEBUG_PRINT(temp);      DEBUG_PRINT(" C, ");
+    DEBUG_PRINT("Hum  : ");       DEBUG_PRINT(humidity);  DEBUG_PRINT(" %RH, ");
+    DEBUG_PRINT("Brightness : "); DEBUG_PRINT(lux_44009); DEBUG_PRINT(" Klux, ");
+    DEBUG_PRINT("Soil  : ");      DEBUG_PRINT(soil);      DEBUG_PRINTLN(" %");
+
+    lv_label_set_text(txtTemp, String(temp, 1).c_str());
+    lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
+
+    lv_label_set_text(txtHumi, String(humidity, 1).c_str());
+    lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+
+    lv_label_set_text(txtHumi2, String(soil, 1).c_str());
+    lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
+
+    lv_label_set_text(txtLight, String(lux_44009, 1).c_str());
+    lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+
+    previousTime_Temp_soil = currentTime;
+  }
+  static unsigned long previousTime_wifi_connect = 0;
+  if ((previousTime_wifi_connect == 0) || ((currentTime - previousTime_wifi_connect) >= 300)) {
+    if (WiFi.isConnected()) {
+      lv_obj_set_hidden(imgWiFi, false);
+      if (client.connected()) {
+        lv_obj_set_hidden(imgNexpie, false);
+      } else {
+        lv_obj_set_hidden(imgNexpie, !lv_obj_get_hidden(imgNexpie));
+      }
+    } else {
+      lv_obj_set_hidden(imgWiFi, !lv_obj_get_hidden(imgWiFi));
+      lv_obj_set_hidden(imgNexpie, true);
+    }
+    previousTime_wifi_connect = currentTime;
+  }
+  if (currentTime - previousTime_brightness >= eventInterval_brightness) {
+    Get_max44009();
+    previousTime_brightness = currentTime;
+  }
+  unsigned long currentTime_Update_data = millis();
+  if (previousTime_Update_data == 0 || (currentTime_Update_data - previousTime_Update_data >= (eventInterval_publishData))) {
+    //check_sendData_toWeb = 1;
+    UpdateData_To_Server();
+    previousTime_Update_data = currentTime_Update_data;
+    soil_old = soil;
+    temp_old = temp;
+  }
+  
+  //  if (abs(soil - soil_old) > difference_soil) {
+  //    digitalWrite(LEDY, HIGH);
+  //    check_sendData_toWeb = 1;
+  //    soil_old = soil;
+  //  }
+  //  if (abs(temp - temp_old) > difference_temp) {
+  //    digitalWrite(LEDY, HIGH);
+  //    check_sendData_toWeb = 1;
+  //    temp_old = temp;
+  //  }
+}
+
+/* --------- Auto Connect Wifi and server and setup value init ------------- */
+void TaskWifiStatus(void * pvParameters) {
+  while (1) {
+    connectWifiStatus = cannotConnect;
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());   
+
+    while (WiFi.status() != WL_CONNECTED) {
+      DEBUG_PRINTLN("WIFI Not connect !!!");
+
+      /* -- ESP Reset -- */
+      if (millis() - time_restart > INTERVAL_MESSAGE2) { // ผ่านไป 1 ชม. ยังไม่ได้เชื่อมต่อ Wifi ให้ Reset ตัวเอง
+        time_restart = millis();
+        ESP.restart();
+      }
+      
+      if (!SmartConfigCheck()) {
+        // NET Status
+        static uint64_t netLEDtimer = 0;
+        if ((millis() - netLEDtimer) > 300) {
+          netLEDtimer = millis();
+          digitalWrite(NET_PIN, !digitalRead(NET_PIN));
+        }
+      }
+
+      delay(100);
+    }
+    
+    connectWifiStatus = wifiConnected;
+    client.setServer(mqtt_server.c_str(), mqtt_port.toInt());
+    client.setCallback(callback);
+    timeClient.begin();
+
+    client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str());
+    delay(100);
+    digitalWrite(NET_PIN, HIGH);
+    while (!client.connected() ) {
+      client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str());
+      DEBUG_PRINTLN("NETPIE2020 can not connect");
+      delay(100);
+    }
+    digitalWrite(NET_PIN, LOW);
+
+    if (client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str())) {
+      connectWifiStatus = serverConnected;
+
+      DEBUG_PRINTLN("NETPIE2020 connected");
+      client.subscribe("@private/#");
+
+      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
+      printLocalTime();
+      rtc.write(&timeinfo);
+
+      OTA_update();
+    }
+    while (WiFi.status() == WL_CONNECTED && client.connected()) { // เชื่อมต่อ wifi แล้ว ไม่ต้องทำอะไรนอกจากส่งค่า
+      if (!SmartConfigCheck()) {
+        digitalWrite(NET_PIN, LOW);
+
+        //UpdateData_To_Server();
+        sendStatus_RelaytoWeb();
+        send_soilMinMax();
+        send_tempMinMax();   
+        delay(500);
+      }
+    }
+  }
+}
+
+/* --------- Auto Connect Serial ------------- */
+void TaskWaitSerial(void * WaitSerial) {
+  while (1) {
+    if (Serial.available())   webSerialJSON();
+    delay(500);
+  }
+}
+
+bool SmartConfigCheck() {
+  static uint8_t state = 0;
+  if (state == 0) {
+    uint8_t stateBefore = digitalRead(NET_PIN);
+    static uint32_t startPress = 0;
+
+    // Check press button
+    pinMode(NET_PIN, INPUT);
+    delay(5);
+    if (digitalRead(NET_PIN) == LOW) {
+      Serial.println("Press recofig button");
+      if (startPress == 0) {
+        startPress = millis();
+      }
+    } else {
+      startPress = 0;
+    }
+    pinMode(NET_PIN, OUTPUT);
+    digitalWrite(NET_PIN, stateBefore);
+    delay(5);
+    
+    if ((startPress > 0) && ((millis() - startPress) > 3000)) {
+      Serial.println("RUN SmartConfig");
+      state = 1;
+    }
+  }
+  if (state == 1) {
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.beginSmartConfig();
+    state = 2;
+  }
+  if (state == 2) {
+    while (state == 2) {
+      if (WiFi.smartConfigDone()) {
+        state = 3;
+      } else {
+        static uint32_t blinkSmartConfigMode = 0;
+        if ((millis() - blinkSmartConfigMode) > 100) {
+          digitalWrite(NET_PIN, !digitalRead(NET_PIN));
+          blinkSmartConfigMode = millis();
+        }
+      }
+      // Serial.println("Wait SmartConfig");
+      delay(10);
+    }
+  }
+  if (state == 3) {
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(300);
+      digitalWrite(NET_PIN, !digitalRead(NET_PIN));
+    }
+    state = 4;
+  }
+  if (state == 4) {
+    Serial.printf("Done configs, SSID: %s, PSK: %s\n", WiFi.SSID().c_str(), WiFi.psk().c_str());
+    
+    // Save to EEPROM
+    EepromStream eeprom(0, 1024);
+    DeserializationError err = deserializeJson(jsonDoc, eeprom);
+    if (err == DeserializationError::Ok) {
+      jsonDoc["ssid"] = WiFi.SSID();
+      jsonDoc["password"] = WiFi.psk();
+        
+      serializeJson(jsonDoc, eeprom);
+      eeprom.flush();
+      DEBUG_PRINTLN("Save WiFi config to EEPROM OK!");
+      delay(100);
+      ESP.restart();
+    } else {
+      DEBUG_PRINTLN("Save config FAIL!");
+    }
+
+    state = 0;
+  }
+
+  return state > 0;
 }
