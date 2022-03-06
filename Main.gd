@@ -523,7 +523,7 @@
 						"define": 1,
 						"alignX": 0,
 						"alignY": 1,
-						"x": 20,
+						"x": 50,
 						"y": 0,
 						"width": 0,
 						"height": 0,
@@ -532,6 +532,48 @@
 						"color": "#FFFFFF",
 						"mode": 0,
 						"font": "Kanit_Regular_20"
+					}
+				},
+				"component-35": {
+					"name": "Button",
+					"property": {
+						"name": "btnGoToSettings",
+						"parent": "topBar",
+						"hidden": 1,
+						"define": 0,
+						"alignX": 0,
+						"alignY": 0,
+						"x": 0,
+						"y": 0,
+						"width": 40,
+						"height": 50,
+						"toggle": 0,
+						"text": "",
+						"rel_main_color": "#0EA661",
+						"rel_grad_color": "#0EA661",
+						"pr_main_color": "#0C8950",
+						"pr_grad_color": "#0C8950",
+						"border_width": 0,
+						"border_color": "#0B1928",
+						"radius": 0,
+						"color": "#FFFFFF",
+						"font": "Roboto_16",
+						"handler": "btnGoToSettingsHandle"
+					}
+				},
+				"component-37": {
+					"name": "Image",
+					"property": {
+						"name": "img5",
+						"parent": "topBar",
+						"hidden": 1,
+						"define": 0,
+						"alignX": 0,
+						"alignY": 1,
+						"x": 10,
+						"y": 0,
+						"src": "D:\\GitHub\\Farm1-HandySense-Firmware\\gear.png",
+						"storage": 0
 					}
 				}
 			}

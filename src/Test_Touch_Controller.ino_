@@ -1,0 +1,243 @@
+#include "Arduino.h"
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <lvgl.h>
+
+#define LCD_BL_PIN 32
+
+TFT_eSPI tft = TFT_eSPI();
+
+static lv_disp_buf_t disp_buf;
+static lv_color_t buf[LV_HOR_RES_MAX * 10];
+
+extern void load_page_touch_calibration() ;
+extern lv_obj_t* TouchCalibrationScreen;
+
+extern lv_obj_t* objTopLeftTouchPoint;
+extern lv_obj_t* objBottomLeftTouchPoint;
+extern lv_obj_t* objBottomRightTouchPoint;
+extern lv_obj_t* objRightLeftTouchPoint;
+
+extern lv_obj_t* txtTouchCalibrationStep;
+extern lv_obj_t* txtTouchCalibrationCountdown;
+
+/* Display flushing */
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+  uint32_t w = (area->x2 - area->x1 + 1);
+  uint32_t h = (area->y2 - area->y1 + 1);
+
+  tft.startWrite();
+  tft.setAddrWindow(area->x1, area->y1, w, h);
+  tft.pushColors(&color_p->full, w * h, true);
+  tft.endWrite();
+
+  lv_disp_flush_ready(disp);
+}
+
+struct {
+  uint16_t max_x = 0;
+  uint16_t max_y = 0;
+  uint16_t min_x = 0;
+  uint16_t min_y = 0;
+} TouchCalibration;
+
+void do_touch_calibration() {
+  uint8_t state = 0;
+  uint16_t i = 0;
+  uint32_t posXsum = 0, posYsum = 0;
+  uint8_t posSample = 0;
+  while(1) {
+    lv_task_handler(); /* let the GUI do its work */
+    
+    uint16_t x, y;
+    // tft.getTouchRaw(&x, &y);
+    tft.getTouchRaw(&y, &x); // Axis wrong
+    Serial.printf("x: %5d\ty: %5d\n", x, y);
+    /* Serial.printf("x: %i     ", x);
+    Serial.printf("y: %i     ", y);
+    Serial.printf("z: %i \n", tft.getTouchRawZ());*/
+    bool isPressed = (x > 0) && (y > 0);
+    
+    if (state == 0) {
+      // Hide all point
+      lv_obj_set_hidden(objTopLeftTouchPoint, true);
+      lv_obj_set_hidden(objBottomLeftTouchPoint, true);
+      lv_obj_set_hidden(objBottomRightTouchPoint, true);
+      lv_obj_set_hidden(objRightLeftTouchPoint, true);
+      
+      lv_label_set_text(txtTouchCalibrationStep, "");
+
+      // Hide countdown
+      lv_obj_set_hidden(txtTouchCalibrationCountdown, true);
+
+      // Show touch calibration screen
+      lv_scr_load(TouchCalibrationScreen);
+      state = 1;
+    }
+    if (state == 1) {
+      lv_obj_set_hidden(objTopLeftTouchPoint, false);
+      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านบนซ้ายค้างไว้");
+      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+      state = 2;
+    }
+    if (state == 2) {
+      if (isPressed) {
+        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
+        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+        i = 0;
+        posXsum = 0;
+        posYsum = 0;
+        posSample = 0;
+        state = 3;
+      }
+    }
+    if (state == 3) {
+      if (isPressed) {
+        if (i >= 20) {
+          posXsum += x;
+          posYsum += y;
+          posSample++;
+          if (posSample >= 10) {
+            TouchCalibration.min_x = (float)posXsum / (float)posSample;
+            TouchCalibration.min_y = (float)posYsum / (float)posSample;
+
+            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
+            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_hidden(objTopLeftTouchPoint, true);
+
+            i = 0;
+            state = 4;
+          }
+        }
+        i++;
+      } else {
+        state = 1;
+      }
+    }
+    if (state == 4) {
+      if (!isPressed) {
+        i++;
+        if (i > 100) {
+          state = 5;
+        }
+      }
+    }
+    if (state == 5) {
+      lv_obj_set_hidden(objBottomRightTouchPoint, false);
+      lv_label_set_text(txtTouchCalibrationStep, "กดจุดด้านล่างขวาค้างไว้");
+      lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+      state = 6;
+    }
+    if (state == 6) {
+      if (isPressed) {
+        lv_label_set_text(txtTouchCalibrationStep, "กดค้างไว้ซักครู่");
+        lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+
+        i = 0;
+        posXsum = 0;
+        posYsum = 0;
+        posSample = 0;
+        state = 7;
+      }
+    }
+    if (state == 7) {
+      if (isPressed) {
+        if (i >= 20) {
+          posXsum += x;
+          posYsum += y;
+          posSample++;
+          if (posSample >= 10) {
+            TouchCalibration.max_x = (float)posXsum / (float)posSample;
+            TouchCalibration.max_y = (float)posYsum / (float)posSample;
+
+            lv_label_set_text(txtTouchCalibrationStep, "หยุดกดจุด");
+            lv_obj_align(txtTouchCalibrationStep, NULL, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_hidden(objBottomRightTouchPoint, true);
+
+            i = 0;
+            state = 8;
+          }
+        }
+        i++;
+      } else {
+        state = 5;
+      }
+    }
+    if (state == 8) {
+      if (!isPressed) {
+        i++;
+        if (i > 100) {
+          state = 9;
+        }
+      }
+    }
+    if (state == 9) {
+      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.min_x, TouchCalibration.min_y);
+      Serial.printf("min_x: %5d\tmin_y: %5d\n", TouchCalibration.max_x, TouchCalibration.max_y);
+      break;
+    }
+
+    delay(5);
+  }
+}
+
+void setup(void) {
+  Serial.begin(115200);
+  Serial.println("\n\nStarting...");
+
+  tft.init();
+
+  tft.begin(); /* TFT init */
+  tft.setRotation(3); /* Landscape orientation */
+
+  lv_init();
+
+  lv_disp_buf_init(&disp_buf, buf, NULL, LV_HOR_RES_MAX * 10);
+
+  /*Initialize the display*/
+  lv_disp_drv_t disp_drv;
+  lv_disp_drv_init(&disp_drv);
+  disp_drv.hor_res = 320;
+  disp_drv.ver_res = 240;
+  disp_drv.flush_cb = my_disp_flush;
+  disp_drv.buffer = &disp_buf;
+  lv_disp_drv_register(&disp_drv);
+
+  load_page_touch_calibration();
+  
+
+  pinMode(LCD_BL_PIN, OUTPUT);
+  digitalWrite(LCD_BL_PIN, LOW);
+   
+  do_touch_calibration();
+}
+
+//====================================================================
+
+void loop() {
+  lv_task_handler();
+  
+  uint16_t x, y;
+  tft.getTouchRaw(&y, &x); // Axis wrong
+  bool isPressed = (x > 0) && (y > 0);
+  Serial.printf("raw_x: %5d\traw_y: %5d\n", x, y);
+
+  x = map(x, TouchCalibration.min_x, TouchCalibration.max_x, 28, 320 - 28);
+  y = map(y, TouchCalibration.min_y, TouchCalibration.max_y, 28, 240 - 28);
+  
+  if (isPressed) {
+    lv_label_set_text(txtTouchCalibrationCountdown, String("(" + String(x) + "," + String(y) + ")").c_str());
+  } else {
+    lv_label_set_text(txtTouchCalibrationCountdown, "Not Press");
+  }
+  lv_obj_align(txtTouchCalibrationCountdown, NULL, LV_ALIGN_CENTER, 0, 26);
+  lv_obj_set_hidden(txtTouchCalibrationCountdown, false);
+
+  delay(5);
+}
+
+//====================================================================
+

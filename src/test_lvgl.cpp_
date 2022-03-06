@@ -1,0 +1,104 @@
+#include "Arduino.h"
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <lvgl.h>
+
+#define LCD_BL_PIN 32
+
+TFT_eSPI tft = TFT_eSPI();
+
+static lv_disp_buf_t disp_buf;
+static lv_color_t buf[LV_HOR_RES_MAX * 10];
+
+/* Display flushing */
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+  uint32_t w = (area->x2 - area->x1 + 1);
+  uint32_t h = (area->y2 - area->y1 + 1);
+
+  tft.startWrite();
+  tft.setAddrWindow(area->x1, area->y1, w, h);
+  tft.pushColors(&color_p->full, w * h, true);
+  tft.endWrite();
+
+  lv_disp_flush_ready(disp);
+}
+
+bool my_input_read(lv_indev_drv_t * drv, lv_indev_data_t*data) {
+  uint16_t x = 0, y = 0;
+  bool touched = tft.getTouch(&x, &y, 500);
+
+  data->point.x = x;
+  data->point.y = y;
+  data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  
+  return false; /*No buffering now so no more data read*/
+}
+
+extern void load_page() ;
+
+extern lv_obj_t* txtTime;
+extern lv_obj_t* imgWiFi;
+extern lv_obj_t* imgNexpie;
+
+extern lv_obj_t* txtTemp;
+extern lv_obj_t* txtHumi;
+extern lv_obj_t* txtHumi2;
+extern lv_obj_t* txtLight;
+
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\n\nStarting...");
+
+  tft.begin(); /* TFT init */
+  tft.setRotation(3); /* Landscape orientation */
+
+  lv_init();
+
+  lv_disp_buf_init(&disp_buf, buf, NULL, LV_HOR_RES_MAX * 10);
+
+  /*Initialize the display*/
+  lv_disp_drv_t disp_drv;
+  lv_disp_drv_init(&disp_drv);
+  disp_drv.hor_res = 320;
+  disp_drv.ver_res = 240;
+  disp_drv.flush_cb = my_disp_flush;
+  disp_drv.buffer = &disp_buf;
+  lv_disp_drv_register(&disp_drv);
+
+  /*Initialize the (dummy) input device driver*/
+  lv_indev_drv_t indev_drv;
+  lv_indev_drv_init(&indev_drv);
+  indev_drv.type = LV_INDEV_TYPE_POINTER;
+  indev_drv.read_cb = my_input_read;
+  lv_indev_drv_register(&indev_drv);
+
+  load_page();
+
+  // Set all label
+  lv_label_set_text(txtTime, "LOADING");
+  lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
+
+  lv_obj_set_hidden(imgWiFi, false);
+  lv_obj_set_hidden(imgNexpie, false);
+
+  lv_label_set_text(txtTemp, "");
+  lv_obj_align(txtTemp, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -30, -37);
+
+  lv_label_set_text(txtHumi, "");
+  lv_obj_align(txtHumi, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -23, -38);
+
+  lv_label_set_text(txtHumi2, "");
+  lv_obj_align(txtHumi2, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -24, -38);
+
+  lv_label_set_text(txtLight, "");
+  lv_obj_align(txtLight, NULL, LV_ALIGN_IN_BOTTOM_RIGHT, -47, -38);
+
+  pinMode(LCD_BL_PIN, OUTPUT);
+  digitalWrite(LCD_BL_PIN, LOW);
+}
+
+void loop() {
+  lv_task_handler(); /* let the GUI do its work */
+  delay(5);
+}
