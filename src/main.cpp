@@ -75,7 +75,6 @@ void sent_dataTimer(String topic, String message) ;
 void ControlRelay_Bytimmer() ;
 void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
-bool SmartConfigCheck() ;
 
 #define DEBUG
 
@@ -1290,7 +1289,16 @@ void loop() {
     soil_old = soil;
     temp_old = temp;
   }
-  
+
+  if (WiFi.isConnected()) {
+    digitalWrite(NET_PIN, LOW);
+  } else {
+    static uint64_t netLEDtimer = 0;
+    if ((millis() - netLEDtimer) > 300) {
+      netLEDtimer = millis();
+      digitalWrite(NET_PIN, !digitalRead(NET_PIN));
+    }
+  }
   //  if (abs(soil - soil_old) > difference_soil) {
   //    digitalWrite(LEDY, HIGH);
   //    check_sendData_toWeb = 1;
@@ -1307,8 +1315,8 @@ void loop() {
 void TaskWifiStatus(void * pvParameters) {
   while (1) {
     connectWifiStatus = cannotConnect;
-    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());   
+    
 
     while (WiFi.status() != WL_CONNECTED) {
       DEBUG_PRINTLN("WIFI Not connect !!!");
@@ -1318,19 +1326,9 @@ void TaskWifiStatus(void * pvParameters) {
         time_restart = millis();
         ESP.restart();
       }
-      
-      if (!SmartConfigCheck()) {
-        // NET Status
-        static uint64_t netLEDtimer = 0;
-        if ((millis() - netLEDtimer) > 300) {
-          netLEDtimer = millis();
-          digitalWrite(NET_PIN, !digitalRead(NET_PIN));
-        }
-      }
-
       delay(100);
     }
-    
+
     connectWifiStatus = wifiConnected;
     client.setServer(mqtt_server.c_str(), mqtt_port.toInt());
     client.setCallback(callback);
@@ -1338,13 +1336,12 @@ void TaskWifiStatus(void * pvParameters) {
 
     client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str());
     delay(100);
-    digitalWrite(NET_PIN, HIGH);
+
     while (!client.connected() ) {
       client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str());
       DEBUG_PRINTLN("NETPIE2020 can not connect");
       delay(100);
     }
-    digitalWrite(NET_PIN, LOW);
 
     if (client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str())) {
       connectWifiStatus = serverConnected;
@@ -1358,16 +1355,12 @@ void TaskWifiStatus(void * pvParameters) {
 
       OTA_update();
     }
-    while (WiFi.status() == WL_CONNECTED && client.connected()) { // เชื่อมต่อ wifi แล้ว ไม่ต้องทำอะไรนอกจากส่งค่า
-      if (!SmartConfigCheck()) {
-        digitalWrite(NET_PIN, LOW);
-
-        //UpdateData_To_Server();
-        sendStatus_RelaytoWeb();
-        send_soilMinMax();
-        send_tempMinMax();   
-        delay(500);
-      }
+    while (WiFi.status() == WL_CONNECTED) { // เชื่อมต่อ wifi แล้ว ไม่ต้องทำอะไรนอกจากส่งค่า
+      //UpdateData_To_Server();
+      sendStatus_RelaytoWeb();
+      send_soilMinMax();
+      send_tempMinMax();   
+      delay(500);
     }
   }
 }
@@ -1378,82 +1371,4 @@ void TaskWaitSerial(void * WaitSerial) {
     if (Serial.available())   webSerialJSON();
     delay(500);
   }
-}
-
-bool SmartConfigCheck() {
-  static uint8_t state = 0;
-  if (state == 0) {
-    uint8_t stateBefore = digitalRead(NET_PIN);
-    static uint32_t startPress = 0;
-
-    // Check press button
-    pinMode(NET_PIN, INPUT);
-    delay(5);
-    if (digitalRead(NET_PIN) == LOW) {
-      Serial.println("Press recofig button");
-      if (startPress == 0) {
-        startPress = millis();
-      }
-    } else {
-      startPress = 0;
-    }
-    pinMode(NET_PIN, OUTPUT);
-    digitalWrite(NET_PIN, stateBefore);
-    delay(5);
-    
-    if ((startPress > 0) && ((millis() - startPress) > 3000)) {
-      Serial.println("RUN SmartConfig");
-      state = 1;
-    }
-  }
-  if (state == 1) {
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.beginSmartConfig();
-    state = 2;
-  }
-  if (state == 2) {
-    while (state == 2) {
-      if (WiFi.smartConfigDone()) {
-        state = 3;
-      } else {
-        static uint32_t blinkSmartConfigMode = 0;
-        if ((millis() - blinkSmartConfigMode) > 100) {
-          digitalWrite(NET_PIN, !digitalRead(NET_PIN));
-          blinkSmartConfigMode = millis();
-        }
-      }
-      // Serial.println("Wait SmartConfig");
-      delay(10);
-    }
-  }
-  if (state == 3) {
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(300);
-      digitalWrite(NET_PIN, !digitalRead(NET_PIN));
-    }
-    state = 4;
-  }
-  if (state == 4) {
-    Serial.printf("Done configs, SSID: %s, PSK: %s\n", WiFi.SSID().c_str(), WiFi.psk().c_str());
-    
-    // Save to EEPROM
-    EepromStream eeprom(0, 1024);
-    DeserializationError err = deserializeJson(jsonDoc, eeprom);
-    if (err == DeserializationError::Ok) {
-      jsonDoc["ssid"] = WiFi.SSID();
-      jsonDoc["password"] = WiFi.psk();
-        
-      serializeJson(jsonDoc, eeprom);
-      eeprom.flush();
-      DEBUG_PRINTLN("Save WiFi config to EEPROM OK!");
-      delay(100);
-      ESP.restart();
-    } else {
-      DEBUG_PRINTLN("Save config FAIL!");
-    }
-
-    state = 0;
-  }
-
-  return state > 0;
 }
