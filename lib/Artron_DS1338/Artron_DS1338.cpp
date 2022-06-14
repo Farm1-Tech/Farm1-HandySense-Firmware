@@ -2,6 +2,7 @@
 
 #define DS1338_ADDR 0x68
 #define MCP79411_ADDR 0x6F
+#define PCF8563_ADDR 0x51
 #define RTC_ADDR MCP79411_ADDR
 
 Artron_DS1338::Artron_DS1338(TwoWire *bus, RTC_Type type) {
@@ -16,6 +17,9 @@ bool Artron_DS1338::begin() {
     } else if (CheckI2CDevice(MCP79411_ADDR)) {
         this->type = MCP79411;
         Serial.println("RTC chip found MCP79411");
+    } else if (CheckI2CDevice(PCF8563_ADDR)) {
+        this->type = PCF8563;
+        Serial.println("RTC chip found PCF8563");
     } else {
         Serial.println("Error, Not found RTC device");
     }
@@ -65,6 +69,17 @@ bool Artron_DS1338::begin() {
         }
     }
 
+    if (this->type == PCF8563) {
+        this->devAddr = PCF8563_ADDR;
+
+        this->wire->beginTransmission(this->devAddr);
+        this->wire->write(0); // Start at address 0
+        this->wire->write(0); // Write 0 to Oscillator Stop Flag for start
+        if (this->wire->endTransmission() != 0) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -74,7 +89,11 @@ bool Artron_DS1338::read(struct tm* timeinfo) {
     }
 
     this->wire->beginTransmission(this->devAddr);
-    this->wire->write(0); // Start at address 0
+    if (this->type == PCF8563) {
+        this->wire->write(0x02); // Start at address 0
+    } else {
+        this->wire->write(0); // Start at address 0
+    }
     if (this->wire->endTransmission() != 0) {
         return false;
     }
@@ -90,8 +109,13 @@ bool Artron_DS1338::read(struct tm* timeinfo) {
     timeinfo->tm_sec = BCDtoDEC(buff[0] & 0x7F);
     timeinfo->tm_min = BCDtoDEC(buff[1] & 0x7F);
     timeinfo->tm_hour = BCDtoDEC(buff[2] & 0x3F);
-    timeinfo->tm_wday = BCDtoDEC(buff[3] & 0x07);
-    timeinfo->tm_mday = BCDtoDEC(buff[4] & 0x3F);
+    if (this->type == PCF8563) {
+        timeinfo->tm_mday = BCDtoDEC(buff[3] & 0x3F);
+        timeinfo->tm_wday = BCDtoDEC(buff[4] & 0x07);
+    } else {
+        timeinfo->tm_wday = BCDtoDEC(buff[3] & 0x07);
+        timeinfo->tm_mday = BCDtoDEC(buff[4] & 0x3F);
+    }
     timeinfo->tm_mon = BCDtoDEC(buff[5] & 0x1F);
     timeinfo->tm_year = BCDtoDEC(buff[6]) + 2000 - 1900;
 
@@ -106,11 +130,16 @@ bool Artron_DS1338::write(struct tm* timeinfo) {
     }
     buff[1] = DECtoBCD(timeinfo->tm_min) & 0x7F;
     buff[2] = DECtoBCD(timeinfo->tm_hour) & 0x3F;
-    buff[3] = DECtoBCD(timeinfo->tm_wday) & 0x07;
-    if (this->type == MCP79411) {
-        buff[3] |= (1 << 3); // Set VBATEN flag
+    if (this->type == PCF8563) {
+        buff[3] = DECtoBCD(timeinfo->tm_mday) & 0x3F;
+        buff[4] = DECtoBCD(timeinfo->tm_wday) & 0x07;
+    } else {
+        buff[3] = DECtoBCD(timeinfo->tm_wday) & 0x07;
+        if (this->type == MCP79411) {
+            buff[3] |= (1 << 3); // Set VBATEN flag
+        }
+        buff[4] = DECtoBCD(timeinfo->tm_mday) & 0x3F;
     }
-    buff[4] = DECtoBCD(timeinfo->tm_mday) & 0x3F;
     buff[5] = DECtoBCD(timeinfo->tm_mon) & 0x1F;
     buff[6] = DECtoBCD((timeinfo->tm_year + 1900) % 100);
 
