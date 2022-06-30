@@ -30,8 +30,6 @@ TFT_eSPI tft = TFT_eSPI();
 static lv_disp_buf_t disp_buf;
 static lv_color_t buf[LV_HOR_RES_MAX * 10];
 
-bool _temp_error = true, _humi_error = true, _soil_error = false, _light_error = true;
-
 /* Display flushing */
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
   uint32_t w = (area->x2 - area->x1 + 1);
@@ -241,6 +239,9 @@ char msg_Minsoil[100],
 char msg_Mintemp[100],
      msg_Maxtemp[100];
 
+int LEDR = -1,  // LED 26= Blue => แสดงสถานะเชื่อมต่อ Wifi
+    LEDY = -1;  // LED 27 = Yenllow => แสดงสถานะส่งข้อมูล, โหมดเชื่อต่อ
+
 const unsigned long eventInterval             = 1 * 1000;          // อ่านค่า temp และ soil sensor ทุก ๆ 1 วินาที
 const unsigned long eventInterval_brightness  = 6 * 1000;          // อ่านค่า brightness sensor ทุก ๆ 6 วินาที
 unsigned long previousTime_Temp_soil          = 0;
@@ -299,9 +300,13 @@ int t[20];
 #define Open_relay(j)    digitalWrite(relay_pin[j], HIGH)
 #define Close_relay(j)   digitalWrite(relay_pin[j], LOW)
 
+#define connect_WifiStatusToBox     -1
 
 /* new PCB Red */
 int relay_pin[4] = {25, 14, 12, 13};
+#define status_sht31_error          -1
+#define status_max44009_error       -1
+#define status_soil_error           -1
 
 // ตัวแปรเก็บค่าการตั้งเวลาทำงานอัตโนมัติ
 unsigned int time_open[4][7][3] = {{{2000, 2000, 2000}, {2000, 2000, 2000}, {2000, 2000, 2000},
@@ -755,6 +760,7 @@ void ControlRelay_BysoilMinMax() {
           statusSoil[k] = 1;
           RelayStatus[k] = 1;
           check_sendData_status = 1;
+          digitalWrite(LEDY, HIGH);
           //check_sendData_toWeb = 1;
           DEBUG_PRINTLN("soil On");
         }
@@ -766,6 +772,7 @@ void ControlRelay_BysoilMinMax() {
           statusSoil[k] = 0;
           RelayStatus[k] = 0;
           check_sendData_status = 1;
+          digitalWrite(LEDY, HIGH);
           //check_sendData_toWeb = 1;
           DEBUG_PRINTLN("soil Off");
         }
@@ -786,6 +793,7 @@ void ControlRelay_BytempMinMax() {
           statusTemp[g] = 0;
           RelayStatus[g] = 0;
           check_sendData_status = 1;
+          digitalWrite(LEDY, HIGH);
           //check_sendData_toWeb = 1;
           DEBUG_PRINTLN("temp Off");
         }
@@ -797,6 +805,7 @@ void ControlRelay_BytempMinMax() {
           statusTemp[g] = 1;
           RelayStatus[g] = 1;
           check_sendData_status = 1;
+          digitalWrite(LEDY, HIGH);
           //check_sendData_toWeb = 1;
           DEBUG_PRINTLN("temp On");
         }
@@ -834,12 +843,14 @@ void Get_sht() {
   if (buffer_temp < -40 || buffer_temp > 125 || isnan(buffer_temp)) { // range -40 to 125 C
     if (temp_error_count >= 10) {
       temp_error = 1;
+      digitalWrite(status_sht31_error, LOW);
       DEBUG_PRINT("temp_error : "); DEBUG_PRINTLN(temp_error);
     } else {
       temp_error_count++;
     }
     DEBUG_PRINT("temp_error_count  : "); DEBUG_PRINTLN(temp_error_count);
   } else {
+    digitalWrite(status_sht31_error, HIGH);
     ma_temp[4] = ma_temp[3];
     ma_temp[3] = ma_temp[2];
     ma_temp[2] = ma_temp[1];
@@ -847,7 +858,7 @@ void Get_sht() {
     ma_temp[0] = buffer_temp;
 
     int mode_value_temp = Mode(ma_temp);
-    for (int i = 0; i < (sizeof(ma_temp) / sizeof(float)); i++) {
+    for (int i = 0; i < sizeof(ma_temp); i++) {
       if (abs(mode_value_temp - ma_temp[i]) < 1) {
         temp_cal = temp_cal + ma_temp[i];
         num_temp++;
@@ -862,12 +873,14 @@ void Get_sht() {
   if (buffer_hum < 0 || buffer_hum > 100  || isnan(buffer_hum)) { // range 0 to 100 %RH
     if (hum_error_count >= 10) {
       hum_error = 1;
+      digitalWrite(status_sht31_error, LOW);
       DEBUG_PRINT("hum_error  : "); DEBUG_PRINTLN(hum_error);
     } else {
       hum_error_count++;
     }
     DEBUG_PRINT("hum_error_count  : "); DEBUG_PRINTLN(hum_error_count);
   } else {
+    digitalWrite(status_sht31_error, HIGH);
     ma_hum[4] = ma_hum[3];
     ma_hum[3] = ma_hum[2];
     ma_hum[2] = ma_hum[1];
@@ -875,7 +888,7 @@ void Get_sht() {
     ma_hum[0] = buffer_hum;
 
     int mode_value_hum = Mode(ma_hum);
-    for (int j = 0; j < (sizeof(ma_hum) / sizeof(float)); j++) {
+    for (int j = 0; j < sizeof(ma_hum); j++) {
       if (abs(mode_value_hum - ma_hum[j]) < 1) {
         hum_cal = hum_cal + ma_hum[j];
         num_hum++;
@@ -898,12 +911,14 @@ void Get_max44009() {
   if (buffer_lux < 0 || buffer_lux > 188000 || isnan(buffer_lux)) { // range 0.045 to 188,000 lux
     if (lux_error_count >= 10) {
       lux_error = 1;
+      digitalWrite(status_max44009_error, LOW);
       DEBUG_PRINT("lux_error  : "); DEBUG_PRINTLN(lux_error);
     } else {
       lux_error_count++;
     }
     DEBUG_PRINT("lux_error_count  : "); DEBUG_PRINTLN(lux_error_count);
   } else {
+    digitalWrite(status_max44009_error, HIGH);
     ma_lux[4] = ma_lux[3];
     ma_lux[3] = ma_lux[2];
     ma_lux[2] = ma_lux[1];
@@ -911,7 +926,7 @@ void Get_max44009() {
     ma_lux[0] = buffer_lux;
 
     int mode_value_lux = Mode(ma_lux);
-    for (int i = 0; i < (sizeof(ma_lux) / sizeof(float)); i++) {
+    for (int i = 0; i < sizeof(ma_lux); i++) {
       if (abs(mode_value_lux - ma_lux[i]) < 1) {
         lux_cal = lux_cal + ma_lux[i];
         num_lux++;
@@ -932,12 +947,14 @@ void Get_soil() {
   if (buffer_soil < 0 || buffer_soil > 100 || isnan(buffer_soil)) { // range 0 to 100 %
     if (soil_error_count >= 10) {
       soil_error = 1;
+      digitalWrite(status_soil_error, LOW);
       DEBUG_PRINT("soil_error : "); DEBUG_PRINTLN(soil_error);
     } else {
       soil_error_count++;
     }
     DEBUG_PRINT("soil_error_count  : "); DEBUG_PRINTLN(soil_error_count);
   } else {
+    digitalWrite(status_soil_error, HIGH);
     ma_soil[4] = ma_soil[3];
     ma_soil[3] = ma_soil[2];
     ma_soil[2] = ma_soil[1];
@@ -1077,7 +1094,6 @@ void webSerialJSON() {
 /* --------- อินเตอร์รัป แสดงสถานะการเชื่อม wifi ------------- */
 int buff_count_LED_serverConnected;
 void IRAM_ATTR Blink_LED() {
-  /*
   if (connectWifiStatus == editDeviceWifi) {
     digitalWrite(LEDR, HIGH);
     digitalWrite(connect_WifiStatusToBox, HIGH);
@@ -1098,7 +1114,6 @@ void IRAM_ATTR Blink_LED() {
       digitalWrite(LEDR, LOW);
     } else buff_count_LED_serverConnected = 0;
   }
-  */
 }
 
 void setup() {
@@ -1112,27 +1127,37 @@ void setup() {
   Wire.begin();
   Wire.setClock(10000);
   rtc.begin();
-  if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) {
-    DEBUG_PRINTLN("Init BH1750 error, Sensor not connect ?");
-    _light_error = true;
-  }
+  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
   pinMode(Soil_moisture_sensorPin, INPUT);
   pinMode(relay_pin[0], OUTPUT);
   pinMode(relay_pin[1], OUTPUT);
   pinMode(relay_pin[2], OUTPUT);
   pinMode(relay_pin[3], OUTPUT);
-  pinMode(NET_PIN, OUTPUT_OPEN_DRAIN);
+  pinMode(LEDR, OUTPUT);
+  pinMode(LEDY, OUTPUT);
+  pinMode(connect_WifiStatusToBox,    OUTPUT);
+  pinMode(status_sht31_error,         OUTPUT);
+  pinMode(status_max44009_error,      OUTPUT);
+  pinMode(status_soil_error,          OUTPUT);
+  pinMode(NET_PIN, OUTPUT);
   digitalWrite(NET_PIN, HIGH);
+  digitalWrite(connect_WifiStatusToBox, HIGH);
+  digitalWrite(status_sht31_error,      HIGH);
+  digitalWrite(status_max44009_error,   HIGH);
+  digitalWrite(status_soil_error,       HIGH);
   digitalWrite(relay_pin[0], LOW);
   digitalWrite(relay_pin[1], LOW);
   digitalWrite(relay_pin[2], LOW);
   digitalWrite(relay_pin[3], LOW);
   // if (!sht31.begin(0x44)) {
   if (!sht.begin()) {
-    DEBUG_PRINTLN("Init SHT20 error, Sensor not connect ?");
-    _temp_error = true;
-    _humi_error = true;
+    Serial.println("Init SHT20 error, Sensor not connect ?");
   }
+  for (int x = 0; x < 20; x++) {
+    digitalWrite(LEDY, 0);    digitalWrite(LEDR, 1);    delay(50);
+    digitalWrite(LEDY, 1);    digitalWrite(LEDR, 0);    delay(50);
+  }
+  digitalWrite(LEDY, HIGH);     digitalWrite(LEDR, HIGH);
 
   tft.begin(); /* TFT init */
   tft.setRotation(3); /* Landscape orientation */
@@ -1293,7 +1318,7 @@ void TaskWifiStatus(void * pvParameters) {
     WiFi.begin(ssid.c_str(), password.c_str());   
     
 
-    while (!WiFi.isConnected()) {
+    while (WiFi.status() != WL_CONNECTED) {
       DEBUG_PRINTLN("WIFI Not connect !!!");
 
       /* -- ESP Reset -- */
@@ -1315,14 +1340,6 @@ void TaskWifiStatus(void * pvParameters) {
     while (!client.connected() ) {
       client.connect(mqtt_Client.c_str(), mqtt_username.c_str(), mqtt_password.c_str());
       DEBUG_PRINTLN("NETPIE2020 can not connect");
-      if (!SmartConfigCheck()) {
-        // NET Status
-        static uint64_t netLEDtimer = 0;
-        if ((millis() - netLEDtimer) > 300) {
-          netLEDtimer = millis();
-          digitalWrite(NET_PIN, !digitalRead(NET_PIN));
-        }
-      }
       delay(100);
     }
 
@@ -1338,7 +1355,7 @@ void TaskWifiStatus(void * pvParameters) {
 
       OTA_update();
     }
-    while (WiFi.isConnected() && client.connected()) { // เชื่อมต่อ wifi แล้ว ไม่ต้องทำอะไรนอกจากส่งค่า
+    while (WiFi.status() == WL_CONNECTED && client.connected()) { // เชื่อมต่อ wifi แล้ว ไม่ต้องทำอะไรนอกจากส่งค่า
       if (!SmartConfigCheck()) {
         digitalWrite(NET_PIN, LOW);
 
@@ -1377,7 +1394,7 @@ bool SmartConfigCheck() {
     } else {
       startPress = 0;
     }
-    pinMode(NET_PIN, OUTPUT_OPEN_DRAIN);
+    pinMode(NET_PIN, OUTPUT);
     digitalWrite(NET_PIN, stateBefore);
     delay(5);
     
@@ -1407,7 +1424,7 @@ bool SmartConfigCheck() {
     }
   }
   if (state == 3) {
-    while (!WiFi.isConnected()) {
+    while (WiFi.status() != WL_CONNECTED) {
       delay(300);
       digitalWrite(NET_PIN, !digitalRead(NET_PIN));
     }

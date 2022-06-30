@@ -7,8 +7,7 @@
 
 enum RTC_Type {
     DS1338,
-    MCP79411,
-    PCF8563
+    MCP79411
 };
 
 class Artron_DS1338 {
