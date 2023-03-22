@@ -618,6 +618,8 @@ void ControlRelay_Bytimmer() {
   if (!getTimeFromInternet) {
     rtc.read(&timeinfo);
     DEBUG_PRINT("USE RTC 1");
+  } else {
+    rtc.write(&timeinfo);
   }
   
   yearNow     = timeinfo.tm_year + 1900;
@@ -1337,7 +1339,6 @@ void TaskWifiStatus(void * pvParameters) {
 
       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, nistTime);
       printLocalTime();
-      rtc.write(&timeinfo);
 
       OTA_update();
     }

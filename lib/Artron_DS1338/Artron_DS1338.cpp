@@ -144,7 +144,7 @@ bool Artron_DS1338::write(struct tm* timeinfo) {
     buff[6] = DECtoBCD((timeinfo->tm_year + 1900) % 100);
 
     this->wire->beginTransmission(this->devAddr);
-    this->wire->write(0); // Start at address 0
+    this->wire->write(type == PCF8563 ? 0x02 : 0x00); // Start at address 0
     this->wire->write(buff, 7);
     if (this->wire->endTransmission() != 0) {
         return false;
