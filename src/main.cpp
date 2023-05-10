@@ -79,7 +79,7 @@ void TempMaxMin_setting(String topic, String message, unsigned int length) ;
 void ControlRelay_Bymanual(String topic, String message, unsigned int length) ;
 bool SmartConfigCheck() ;
 
-#define DEBUG
+// #define DEBUG
 
 #ifndef DEBUG
 #define DEBUG_PRINT(x)    //Serial.print(x)
@@ -638,7 +638,7 @@ void ControlRelay_Bytimmer() {
   lv_label_set_text(txtTime, time_str_buff);
   lv_obj_align(txtTime, NULL, LV_ALIGN_IN_LEFT_MID, 20, 0);
 
-  //DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
+  DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
   /* check curentTimer => 0-1440 */
   if (curentTimer < 0 || curentTimer > 1440) {
     curentTimerError = 1;
@@ -651,26 +651,34 @@ void ControlRelay_Bytimmer() {
     //DEBUG_PRINT("dayofweek   : "); DEBUG_PRINTLN(dayofweek);
     if (curentTimer != oldTimer) {
       for (int i = 0; i < 4; i++) {
+        bool isOpen = false;
         for (int j = 0; j < 3; j++) {
-          if (time_open[i][dayofweek][j] == curentTimer) {
+          if ((curentTimer >= time_open[i][dayofweek][j]) && (curentTimer < time_close[i][dayofweek][j])) {
+            isOpen = true;
+          }
+        }
+
+        if (isOpen) {
+          if (RelayStatus[i] == 0) {
             RelayStatus[i] = 1;
             check_sendData_status = 1;
             Open_relay(i);
             DEBUG_PRINTLN("timer On");
-            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
+            DEBUG_PRINT("curentTimer : ");
+            DEBUG_PRINTLN(curentTimer);
+            DEBUG_PRINT("oldTimer    : ");
+            DEBUG_PRINTLN(oldTimer);
           }
-          else if (time_close[i][dayofweek][j] == curentTimer) {
+        } else {
+          if (RelayStatus[i] == 1) {
             RelayStatus[i] = 0;
             check_sendData_status = 1;
             Close_relay(i);
             DEBUG_PRINTLN("timer Off");
-            DEBUG_PRINT("curentTimer : "); DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : "); DEBUG_PRINTLN(oldTimer);
-          }
-          else if (time_open[i][dayofweek][j] == 3000 && time_close[i][dayofweek][j] == 3000) {
-            //        Close_relay(i);
-            //        DEBUG_PRINTLN(" Not check day, Not Working relay");
+            DEBUG_PRINT("curentTimer : ");
+            DEBUG_PRINTLN(curentTimer);
+            DEBUG_PRINT("oldTimer    : ");
+            DEBUG_PRINTLN(oldTimer);
           }
         }
       }

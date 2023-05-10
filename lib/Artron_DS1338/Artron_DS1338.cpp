@@ -13,15 +13,15 @@ Artron_DS1338::Artron_DS1338(TwoWire *bus, RTC_Type type) {
 bool Artron_DS1338::begin() {
     if (CheckI2CDevice(DS1338_ADDR)) {
         this->type = DS1338;
-        Serial.println("RTC chip found DS1338");
+        // Serial.println("RTC chip found DS1338");
     } else if (CheckI2CDevice(MCP79411_ADDR)) {
         this->type = MCP79411;
-        Serial.println("RTC chip found MCP79411");
+        // Serial.println("RTC chip found MCP79411");
     } else if (CheckI2CDevice(PCF8563_ADDR)) {
         this->type = PCF8563;
-        Serial.println("RTC chip found PCF8563");
+        // Serial.println("RTC chip found PCF8563");
     } else {
-        Serial.println("Error, Not found RTC device");
+        // Serial.println("Error, Not found RTC device");
     }
 
     if (this->type == DS1338) {
