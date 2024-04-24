@@ -652,33 +652,42 @@ void ControlRelay_Bytimmer() {
     if (curentTimer != oldTimer) {
       for (int i = 0; i < 4; i++) {
         bool isOpen = false;
+        bool timerEnable = false;
         for (int j = 0; j < 3; j++) {
-          if ((curentTimer >= time_open[i][dayofweek][j]) && (curentTimer < time_close[i][dayofweek][j])) {
-            isOpen = true;
+          if (time_open[i][dayofweek][j] != 2000 && time_close[i][dayofweek][j] != 2000) {
+            if (time_open[i][dayofweek][j] == curentTimer) {
+              isOpen = true;
+              timerEnable = true;
+            } else if (time_close[i][dayofweek][j] == curentTimer) {
+              isOpen = false;
+              timerEnable = true;
+            }
           }
         }
 
-        if (isOpen) {
-          if (RelayStatus[i] == 0) {
-            RelayStatus[i] = 1;
-            check_sendData_status = 1;
-            Open_relay(i);
-            DEBUG_PRINTLN("timer On");
-            DEBUG_PRINT("curentTimer : ");
-            DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : ");
-            DEBUG_PRINTLN(oldTimer);
-          }
-        } else {
-          if (RelayStatus[i] == 1) {
-            RelayStatus[i] = 0;
-            check_sendData_status = 1;
-            Close_relay(i);
-            DEBUG_PRINTLN("timer Off");
-            DEBUG_PRINT("curentTimer : ");
-            DEBUG_PRINTLN(curentTimer);
-            DEBUG_PRINT("oldTimer    : ");
-            DEBUG_PRINTLN(oldTimer);
+        if (timerEnable) {
+          if (isOpen) {
+            if (RelayStatus[i] == 0) {
+              RelayStatus[i] = 1;
+              check_sendData_status = 1;
+              Open_relay(i);
+              DEBUG_PRINTLN("timer On");
+              DEBUG_PRINT("curentTimer : ");
+              DEBUG_PRINTLN(curentTimer);
+              DEBUG_PRINT("oldTimer    : ");
+              DEBUG_PRINTLN(oldTimer);
+            }
+          } else {
+            if (RelayStatus[i] == 1) {
+              RelayStatus[i] = 0;
+              check_sendData_status = 1;
+              Close_relay(i);
+              DEBUG_PRINTLN("timer Off");
+              DEBUG_PRINT("curentTimer : ");
+              DEBUG_PRINTLN(curentTimer);
+              DEBUG_PRINT("oldTimer    : ");
+              DEBUG_PRINTLN(oldTimer);
+            }
           }
         }
       }
